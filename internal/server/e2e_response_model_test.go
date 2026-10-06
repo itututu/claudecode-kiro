@@ -19,6 +19,48 @@ func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 		wantUpstream string // Kiro SKU sent upstream
 	}{
 		{
+			name:         "sonnet-5-5 gets 1m suffix in response",
+			requestModel: "claude-sonnet-5-5",
+			wantResponse: "claude-sonnet-5-5[1m]",
+			wantUpstream: "claude-sonnet-5.5",
+		},
+		{
+			name:         "sonnet-5.5 Kiro ID maps to Anthropic form",
+			requestModel: "claude-sonnet-5.5",
+			wantResponse: "claude-sonnet-5-5[1m]",
+			wantUpstream: "claude-sonnet-5.5",
+		},
+		{
+			name:         "sonnet-4-6[1m] routes to base SKU, not retired -1m",
+			requestModel: "claude-sonnet-4-6[1m]",
+			wantResponse: "claude-sonnet-4-6[1m]",
+			wantUpstream: "claude-sonnet-4.6",
+		},
+		{
+			name:         "dated haiku snapshot resolves to Kiro SKU",
+			requestModel: "claude-haiku-4-5-20251001",
+			wantResponse: "claude-haiku-4-5",
+			wantUpstream: "claude-haiku-4.5",
+		},
+		{
+			name:         "opus-5-5 gets 1m suffix in response",
+			requestModel: "claude-opus-5-5",
+			wantResponse: "claude-opus-5-5[1m]",
+			wantUpstream: "claude-opus-5.5",
+		},
+		{
+			name:         "opus-5-5[1m] exact-match preserved verbatim",
+			requestModel: "claude-opus-5-5[1m]",
+			wantResponse: "claude-opus-5-5[1m]",
+			wantUpstream: "claude-opus-5.5",
+		},
+		{
+			name:         "opus-5.5 Kiro ID maps to Anthropic form",
+			requestModel: "claude-opus-5.5",
+			wantResponse: "claude-opus-5-5[1m]",
+			wantUpstream: "claude-opus-5.5",
+		},
+		{
 			name:         "opus-5 gets 1m suffix in response",
 			requestModel: "claude-opus-5",
 			wantResponse: "claude-opus-5[1m]",
@@ -61,9 +103,9 @@ func TestE2E_ResponseModel_NonStreaming(t *testing.T) {
 			wantUpstream: "claude-opus-4.6",
 		},
 		{
-			name:         "sonnet-4-6 hyphen preserved in response",
+			name:         "sonnet-4-6 always-1M gets [1m] suffix in response",
 			requestModel: "claude-sonnet-4-6",
-			wantResponse: "claude-sonnet-4-6",
+			wantResponse: "claude-sonnet-4-6[1m]",
 			wantUpstream: "claude-sonnet-4.6",
 		},
 		{
@@ -145,6 +187,16 @@ func TestE2E_ResponseModel_Streaming(t *testing.T) {
 		requestModel string
 		wantResponse string
 	}{
+		{
+			name:         "sonnet-5-5[1m] exact-match preserved verbatim in message_start",
+			requestModel: "claude-sonnet-5-5[1m]",
+			wantResponse: "claude-sonnet-5-5[1m]",
+		},
+		{
+			name:         "opus-5-5[1m] exact-match preserved verbatim in message_start",
+			requestModel: "claude-opus-5-5[1m]",
+			wantResponse: "claude-opus-5-5[1m]",
+		},
 		{
 			name:         "opus-5 gets 1m suffix in message_start",
 			requestModel: "claude-opus-5",

@@ -9,7 +9,13 @@ func TestResolveEffort(t *testing.T) {
 		requested string
 		want      string
 	}{
-		// opus-5 / 4.8 / 4.7 / sonnet-5: full enum including xhigh.
+		// opus-5.5 / 5 / 4.8 / 4.7 / sonnet-5.5 / sonnet-5: full enum including xhigh.
+		{"opus-5.5 low", "claude-opus-5.5", "low", "low"},
+		{"opus-5.5 medium", "claude-opus-5.5", "medium", "medium"},
+		{"opus-5.5 high", "claude-opus-5.5", "high", "high"},
+		{"opus-5.5 xhigh", "claude-opus-5.5", "xhigh", "xhigh"},
+		{"opus-5.5 max", "claude-opus-5.5", "max", "max"},
+		{"opus-5.5 invalid dropped", "claude-opus-5.5", "enabled", ""},
 		{"opus-5 xhigh", "claude-opus-5", "xhigh", "xhigh"},
 		{"opus-5 max", "claude-opus-5", "max", "max"},
 		{"opus-5 low", "claude-opus-5", "low", "low"},
@@ -17,6 +23,11 @@ func TestResolveEffort(t *testing.T) {
 		{"opus-4.8 max", "claude-opus-4.8", "max", "max"},
 		{"opus-4.8 low", "claude-opus-4.8", "low", "low"},
 		{"opus-4.7 xhigh", "claude-opus-4.7", "xhigh", "xhigh"},
+		{"sonnet-5.5 low", "claude-sonnet-5.5", "low", "low"},
+		{"sonnet-5.5 high", "claude-sonnet-5.5", "high", "high"},
+		{"sonnet-5.5 xhigh", "claude-sonnet-5.5", "xhigh", "xhigh"},
+		{"sonnet-5.5 max", "claude-sonnet-5.5", "max", "max"},
+		{"sonnet-5.5 invalid dropped", "claude-sonnet-5.5", "enabled", ""},
 		{"sonnet-5 xhigh", "claude-sonnet-5", "xhigh", "xhigh"},
 		{"sonnet-5 max", "claude-sonnet-5", "max", "max"},
 		{"sonnet-5 low", "claude-sonnet-5", "low", "low"},
@@ -26,13 +37,15 @@ func TestResolveEffort(t *testing.T) {
 		{"opus-4.6 max", "claude-opus-4.6", "max", "max"},
 		{"opus-4.6 xhigh downgrades to max", "claude-opus-4.6", "xhigh", "max"},
 		{"sonnet-4.6 xhigh downgrades to max", "claude-sonnet-4.6", "xhigh", "max"},
-		{"sonnet-4.6-1m xhigh downgrades to max", "claude-sonnet-4.6-1m", "xhigh", "max"},
-		{"opus-4.6-1m medium", "claude-opus-4.6-1m", "medium", "medium"},
 
 		// Unsupported models: effort dropped entirely.
 		{"opus-4.5 unsupported", "claude-opus-4.5", "max", ""},
 		{"sonnet-4.5 unsupported", "claude-sonnet-4.5", "high", ""},
 		{"haiku-4.5 unsupported", "claude-haiku-4.5", "xhigh", ""},
+		{"sonnet-4 unsupported", "claude-sonnet-4", "high", ""},
+		// Legacy -1m SKUs reject additionalModelRequestFields upstream.
+		{"sonnet-4.6-1m unsupported", "claude-sonnet-4.6-1m", "high", ""},
+		{"opus-4.6-1m unsupported", "claude-opus-4.6-1m", "medium", ""},
 		{"unknown model unsupported", "some-other-model", "max", ""},
 
 		// Unrecognized effort values are dropped, NOT silently promoted to max.

@@ -17,6 +17,137 @@ func TestResolve(t *testing.T) {
 		wantAnthropicModel string
 	}{
 		{
+			name:               "claude-sonnet-5-5 uses 1m context without thinking",
+			model:              "claude-sonnet-5-5",
+			wantKiroModel:      "claude-sonnet-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-5-5[1m]",
+		},
+		{
+			name:               "claude-sonnet-5-5[1m] exact-match preserves suffix without thinking",
+			model:              "claude-sonnet-5-5[1m]",
+			wantKiroModel:      "claude-sonnet-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-5-5[1m]",
+		},
+		{
+			name:               "claude-sonnet-5.5 Kiro ID maps to Anthropic form",
+			model:              "claude-sonnet-5.5",
+			wantKiroModel:      "claude-sonnet-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-5-5[1m]",
+		},
+		{
+			name:               "claude-sonnet-5.5[1m] Kiro-style context alias without thinking",
+			model:              "claude-sonnet-5.5[1m]",
+			wantKiroModel:      "claude-sonnet-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-5-5[1m]",
+		},
+		{
+			name:               "claude-sonnet-5-5[1m] with context1M enables thinking",
+			model:              "claude-sonnet-5-5[1m]",
+			context1M:          true,
+			wantKiroModel:      "claude-sonnet-5.5",
+			wantThinking:       true,
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-5-5[1m]",
+		},
+		{
+			name:               "dated haiku snapshot resolves to its alias",
+			model:              "claude-haiku-4-5-20251001",
+			wantKiroModel:      "claude-haiku-4.5",
+			wantContextWindow:  DefaultContextWindowSize,
+			wantAnthropicModel: "claude-haiku-4-5",
+		},
+		{
+			name:               "dated snapshot keeps [1m] context alias",
+			model:              "claude-sonnet-4-6-20260101[1M]",
+			wantKiroModel:      "claude-sonnet-4.6",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-4-6[1m]",
+		},
+		{
+			name:               "dated unknown claude model passes through without date",
+			model:              "claude-future-9-20990101",
+			wantKiroModel:      "claude-future-9",
+			wantContextWindow:  DefaultContextWindowSize,
+			wantAnthropicModel: "claude-future-9",
+		},
+		{
+			name:               "claude-sonnet-4-5 maps to dotted Kiro SKU",
+			model:              "claude-sonnet-4-5",
+			wantKiroModel:      "claude-sonnet-4.5",
+			wantContextWindow:  DefaultContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-4-5",
+		},
+		{
+			name:               "claude-sonnet-4.5[1m] no longer routes to retired -1m SKU",
+			model:              "claude-sonnet-4.5[1m]",
+			wantKiroModel:      "claude-sonnet-4.5",
+			wantThinking:       true,
+			wantContextWindow:  DefaultContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-4-5",
+		},
+		{
+			name:               "claude-opus-4-5 maps to dotted Kiro SKU",
+			model:              "claude-opus-4-5",
+			wantKiroModel:      "claude-opus-4.5",
+			wantContextWindow:  DefaultContextWindowSize,
+			wantAnthropicModel: "claude-opus-4-5",
+		},
+		{
+			name:               "non-date numeric tail is not stripped",
+			model:              "claude-opus-4-6-123",
+			wantKiroModel:      "claude-opus-4-6-123",
+			wantContextWindow:  DefaultContextWindowSize,
+			wantAnthropicModel: "claude-opus-4-6-123",
+		},
+		{
+			name:               "claude-opus-5-5 uses 1m context without thinking",
+			model:              "claude-opus-5-5",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5-5[1m] exact-match preserves suffix without thinking",
+			model:              "claude-opus-5-5[1m]",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5-5 uppercase [1M] is normalized without thinking",
+			model:              "claude-opus-5-5[1M]",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5.5 Kiro ID maps to Anthropic form",
+			model:              "claude-opus-5.5",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5.5[1m] Kiro-style context alias without thinking",
+			model:              "claude-opus-5.5[1m]",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5-5[1m] with context1M enables thinking",
+			model:              "claude-opus-5-5[1m]",
+			context1M:          true,
+			wantKiroModel:      "claude-opus-5.5",
+			wantThinking:       true,
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
 			name:               "claude-opus-5 uses 1m context without thinking",
 			model:              "claude-opus-5",
 			wantKiroModel:      "claude-opus-5",
@@ -160,32 +291,31 @@ func TestResolve(t *testing.T) {
 			wantAnthropicModel: "claude-sonnet-5[1m]",
 		},
 		{
-			name:               "claude-sonnet-4-6",
+			name:               "claude-sonnet-4-6 is always 1m without thinking",
 			model:              "claude-sonnet-4-6",
 			wantKiroModel:      "claude-sonnet-4.6",
-			wantContextWindow:  DefaultContextWindowSize,
-			wantAnthropicModel: "claude-sonnet-4-6",
-		},
-		{
-			name:               "kiro model name claude-sonnet-4.6 without thinking suffix",
-			model:              "claude-sonnet-4.6",
-			wantKiroModel:      "claude-sonnet-4.6",
-			wantContextWindow:  DefaultContextWindowSize,
-			wantAnthropicModel: "claude-sonnet-4-6",
-		},
-		{
-			name:               "claude-sonnet-4-6 with thinking suffix",
-			model:              "claude-sonnet-4-6[1m]",
-			wantKiroModel:      "claude-sonnet-4.6-1m",
-			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-sonnet-4-6[1m]",
 		},
 		{
-			name:               "claude-sonnet-4-6 with context1M resolves to 1m",
+			name:               "kiro model name claude-sonnet-4.6 maps to Anthropic form",
+			model:              "claude-sonnet-4.6",
+			wantKiroModel:      "claude-sonnet-4.6",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-4-6[1m]",
+		},
+		{
+			name:               "claude-sonnet-4-6[1m] is a context alias, not the retired -1m SKU",
+			model:              "claude-sonnet-4-6[1m]",
+			wantKiroModel:      "claude-sonnet-4.6",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-4-6[1m]",
+		},
+		{
+			name:               "claude-sonnet-4-6 with context1M enables thinking on base SKU",
 			model:              "claude-sonnet-4-6",
 			context1M:          true,
-			wantKiroModel:      "claude-sonnet-4.6-1m",
+			wantKiroModel:      "claude-sonnet-4.6",
 			wantThinking:       true,
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-sonnet-4-6[1m]",
@@ -203,7 +333,7 @@ func TestResolve(t *testing.T) {
 			model:              "claude-haiku-4.5",
 			wantKiroModel:      "claude-haiku-4.5",
 			wantContextWindow:  DefaultContextWindowSize,
-			wantAnthropicModel: "claude-haiku-4.5",
+			wantAnthropicModel: "claude-haiku-4-5",
 		},
 		{
 			name:               "claude-haiku-4.5 with thinking suffix no 1m variant",
@@ -211,7 +341,7 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      "claude-haiku-4.5",
 			wantThinking:       true,
 			wantContextWindow:  DefaultContextWindowSize,
-			wantAnthropicModel: "claude-haiku-4.5",
+			wantAnthropicModel: "claude-haiku-4-5",
 		},
 		{
 			name:               "claude-haiku-4.5 with context1M no 1m variant",
@@ -220,13 +350,12 @@ func TestResolve(t *testing.T) {
 			wantKiroModel:      "claude-haiku-4.5",
 			wantThinking:       true,
 			wantContextWindow:  DefaultContextWindowSize,
-			wantAnthropicModel: "claude-haiku-4.5",
+			wantAnthropicModel: "claude-haiku-4-5",
 		},
 		{
-			name:               "kiro model name claude-sonnet-4.6 with thinking suffix resolves to 1m",
+			name:               "kiro model name claude-sonnet-4.6[1m] is a context alias",
 			model:              "claude-sonnet-4.6[1m]",
-			wantKiroModel:      "claude-sonnet-4.6-1m",
-			wantThinking:       true,
+			wantKiroModel:      "claude-sonnet-4.6",
 			wantContextWindow:  ThinkingContextWindowSize,
 			wantAnthropicModel: "claude-sonnet-4-6[1m]",
 		},
@@ -272,8 +401,8 @@ func TestResolve(t *testing.T) {
 			envMappings:        `not-valid-json`,
 			model:              "claude-sonnet-4-6",
 			wantKiroModel:      "claude-sonnet-4.6",
-			wantContextWindow:  DefaultContextWindowSize,
-			wantAnthropicModel: "claude-sonnet-4-6",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-sonnet-4-6[1m]",
 		},
 		{
 			name:               "env override with empty anthropic does not poison non-claude fallback",
@@ -330,6 +459,14 @@ func TestListModels(t *testing.T) {
 			checkModel: "claude-sonnet-5",
 		},
 		{
+			name:       "claude-sonnet-5.5 is listed exactly once (both alias rows dedupe to one Kiro value)",
+			checkModel: "claude-sonnet-5.5",
+		},
+		{
+			name:       "claude-opus-5.5 is listed exactly once (both alias rows dedupe to one Kiro value)",
+			checkModel: "claude-opus-5.5",
+		},
+		{
 			name:       "claude-opus-5 is listed exactly once (both alias rows dedupe to one Kiro value)",
 			checkModel: "claude-opus-5",
 		},
@@ -360,6 +497,12 @@ func TestListModels(t *testing.T) {
 					t.Errorf("ListModels returned duplicate: %q", m)
 				}
 				seen[m] = true
+			}
+
+			for _, retired := range []string{"claude-sonnet-4.6-1m", "claude-sonnet-4.5-1m"} {
+				if slices.Contains(result, retired) {
+					t.Errorf("ListModels advertises retired SKU %q", retired)
+				}
 			}
 
 			if tt.checkModel != "" && !slices.Contains(result, tt.checkModel) {

@@ -17,6 +17,11 @@ func TestResolveEffort(t *testing.T) {
 		want      string
 	}{
 		// Explicit effort passes through (validated against the model enum).
+		{"explicit high on opus-5.5", "claude-opus-5.5", "high", true, "high"},
+		{"explicit xhigh on opus-5.5", "claude-opus-5.5", "xhigh", true, "xhigh"},
+		{"explicit max on opus-5.5", "claude-opus-5.5", "max", false, "max"},
+		{"explicit xhigh on sonnet-5.5", "claude-sonnet-5.5", "xhigh", true, "xhigh"},
+		{"explicit max on sonnet-5.5", "claude-sonnet-5.5", "max", false, "max"},
 		{"explicit max on opus-5", "claude-opus-5", "max", false, "max"},
 		{"explicit xhigh on opus-5", "claude-opus-5", "xhigh", true, "xhigh"},
 		{"explicit max on opus-4.8", "claude-opus-4.8", "max", false, "max"},
@@ -31,6 +36,8 @@ func TestResolveEffort(t *testing.T) {
 
 		// No effort but thinking enabled: fall back to the default effort so the
 		// reasoning request still reaches the backend natively.
+		{"thinking only, effort-capable opus-5.5", "claude-opus-5.5", "", true, models.EffortMedium},
+		{"thinking only, effort-capable sonnet-5.5", "claude-sonnet-5.5", "", true, models.EffortMedium},
 		{"thinking only, effort-capable opus-5", "claude-opus-5", "", true, models.EffortMedium},
 		{"thinking only, effort-capable opus-4.8", "claude-opus-4.8", "", true, models.EffortMedium},
 		{"thinking only, effort-capable sonnet-4.6", "claude-sonnet-4.6", "", true, models.EffortMedium},

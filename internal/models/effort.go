@@ -24,20 +24,21 @@ var effortRank = map[string]int{
 
 // effortEnums maps each effort-capable Kiro model to its allowed effort levels,
 // matching the per-model additionalModelRequestFieldsSchema advertised by
-// ListAvailableModels (kiro-cli 2.10.0). Models absent from this table do not
-// support effort and must omit additionalModelRequestFields entirely.
+// ListAvailableModels (re-verified against kiro-cli 2.27.1). Models absent from
+// this table do not support effort and must omit additionalModelRequestFields.
 var effortEnums = map[string][]string{
 	// 5-value enum (includes xhigh); 128000 max-output models.
+	"claude-opus-5.5": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
 	"claude-opus-5":   {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
 	"claude-opus-4.8": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
 	"claude-opus-4.7": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
-	// 5-value enum (includes xhigh); 64000 max-output model.
-	"claude-sonnet-5": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
-	// 4-value enum (no xhigh); 64000 max-output models.
-	"claude-opus-4.6":      {EffortLow, EffortMedium, EffortHigh, EffortMax},
-	"claude-sonnet-4.6":    {EffortLow, EffortMedium, EffortHigh, EffortMax},
-	"claude-opus-4.6-1m":   {EffortLow, EffortMedium, EffortHigh, EffortMax},
-	"claude-sonnet-4.6-1m": {EffortLow, EffortMedium, EffortHigh, EffortMax},
+	// 5-value enum (includes xhigh); 64000 max-output models.
+	"claude-sonnet-5.5": {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
+	"claude-sonnet-5":   {EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax},
+	// 4-value enum (no xhigh); 64000 max-output models. The legacy -1m SKUs
+	// accept no additionalModelRequestFields, so they are intentionally absent.
+	"claude-opus-4.6":   {EffortLow, EffortMedium, EffortHigh, EffortMax},
+	"claude-sonnet-4.6": {EffortLow, EffortMedium, EffortHigh, EffortMax},
 }
 
 // ResolveEffort returns the effort level to send for the given Kiro model.

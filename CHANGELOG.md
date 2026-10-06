@@ -22,6 +22,21 @@ pre-release tags based on the upstream kirocc version.
   no Kiro inference host.
 - Kiro-style always-1M aliases such as `claude-opus-4.8[1m]` and `[1M]` now
   resolve exactly without accidentally enabling thinking.
+- `claude-opus-5-5` / `claude-opus-5-5[1m]` now map to Kiro's always-1M
+  `claude-opus-5.5` SKU with the five-level effort enum, so `high`/`xhigh`/`max`
+  are forwarded natively instead of dropped (no `KIROCC_MODEL_MAPPINGS` needed).
+- `claude-sonnet-5-5` / `claude-sonnet-5-5[1m]` likewise map to Kiro's
+  always-1M `claude-sonnet-5.5` SKU with the five-level effort enum.
+- `claude-sonnet-4-6[1m]` and the `context-1m` header no longer route to the
+  legacy `claude-sonnet-4.6-1m` SKU, which accepts no effort fields and silently
+  dropped every requested effort. Sonnet 4.6 now uses its always-1M base SKU.
+- `claude-sonnet-4.5[1m]` no longer routes to `claude-sonnet-4.5-1m`, which Kiro
+  rejects as unavailable; Sonnet 4.5 is 200k only.
+- Dated snapshot IDs such as Claude Code's `claude-haiku-4-5-20251001`, and
+  dashed 4.5-family IDs (`claude-haiku-4-5`, `claude-sonnet-4-5`,
+  `claude-opus-4-5`), now resolve to Kiro SKUs instead of passing through to an
+  "model not available" error.
+- Per-model effort enums re-verified against the kiro-cli 2.27.1 catalog.
 - Claude Code's new default `claude-opus-5[1m]` model now maps explicitly to
   Kiro's `claude-opus-5` SKU with the supported five-level effort enum; its
   context suffix no longer falls through the legacy thinking path.

@@ -716,11 +716,11 @@ kiro-cli 2.10.0 expresses reasoning depth natively through `output_config.effort
 
 Thinking is enabled by any of:
 
-- Model name with `[1m]` suffix (e.g., `claude-sonnet-4-6[1m]`)
+- Model name with `[1m]` suffix on a model without an always-1M alias (e.g., `claude-sonnet-4-5[1m]`)
 - `Anthropic-Beta` header containing `context-1m` (e.g., `context-1m-2025-01-01`)
 - `thinking.type` set to `"enabled"` or `"adaptive"` in the request
 
-Exception: the `[1m]` suffix on an **always-1M** model (`claude-opus-5[1m]` / `claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]`) is a first-class alias that only advertises the 1M context window — it does **not** enable thinking (see [Model mappings](#model-mappings)). Thinking on those models is still opt-in via the `context-1m` header or the `thinking` field.
+Exception: the `[1m]` suffix on an **always-1M** model (`claude-opus-5-5[1m]` / `claude-sonnet-5-5[1m]` / `claude-opus-5[1m]` / `claude-opus-4-8[1m]` / `claude-opus-4-7[1m]` / `claude-opus-4-6[1m]` / `claude-sonnet-5[1m]` / `claude-sonnet-4-6[1m]`) is a first-class alias that only advertises the 1M context window — it does **not** enable thinking (see [Model mappings](#model-mappings)). Thinking on those models is still opt-in via the `context-1m` header or the `thinking` field.
 
 The reasoning effort sent to the backend is resolved as follows:
 
@@ -730,9 +730,11 @@ The reasoning effort sent to the backend is resolved as follows:
 
 Per-model allowed effort levels:
 
-- `claude-opus-5`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-sonnet-5`: `low`, `medium`, `high`, `xhigh`, `max`
-- `claude-opus-4.6`, `claude-sonnet-4.6` (and their `-1m` variants): `low`, `medium`, `high`, `max` (no `xhigh`; clamps to `max`)
-- All other models omit `additionalModelRequestFields` entirely
+- `claude-opus-5.5`, `claude-sonnet-5.5`, `claude-opus-5`, `claude-sonnet-5`, `claude-opus-4.8`, `claude-opus-4.7`: `low`, `medium`, `high`, `xhigh`, `max`
+- `claude-opus-4.6`, `claude-sonnet-4.6`: `low`, `medium`, `high`, `max` (no `xhigh`; clamps to `max`)
+- All other models (`claude-sonnet-4.5`, `claude-opus-4.5`, `claude-haiku-4.5`, `claude-sonnet-4`, legacy `-1m` SKUs) omit `additionalModelRequestFields` entirely
+
+These enums were re-verified against the kiro-cli 2.27.1 model catalog.
 
 `thinking.budget_tokens` is accepted in the request but no longer affects behavior; reasoning depth is conveyed entirely through `effort`.
 
@@ -759,32 +761,35 @@ Supported query forms:
 
 | Input model             | Kiro model             | Context window |
 | ----------------------- | ---------------------- | -------------- |
+| `claude-opus-5-5`       | `claude-opus-5.5`      | 1M             |
+| `claude-opus-5-5[1m]`   | `claude-opus-5.5`      | 1M             |
+| `claude-sonnet-5-5`     | `claude-sonnet-5.5`    | 1M             |
+| `claude-sonnet-5-5[1m]` | `claude-sonnet-5.5`    | 1M             |
 | `claude-opus-5`         | `claude-opus-5`        | 1M             |
 | `claude-opus-5[1m]`     | `claude-opus-5`        | 1M             |
 | `claude-sonnet-5`       | `claude-sonnet-5`      | 1M             |
 | `claude-sonnet-5[1m]`   | `claude-sonnet-5`      | 1M             |
-| `claude-sonnet-4-6`     | `claude-sonnet-4.6`    | 200k           |
-| `claude-sonnet-4-6[1m]` | `claude-sonnet-4.6-1m` | 1M             |
-| `claude-sonnet-4.5`     | `claude-sonnet-4.5`    | 200k           |
-| `claude-sonnet-4.5[1m]` | `claude-sonnet-4.5-1m` | 1M             |
+| `claude-sonnet-4-6`     | `claude-sonnet-4.6`    | 1M             |
+| `claude-sonnet-4-6[1m]` | `claude-sonnet-4.6`    | 1M             |
+| `claude-sonnet-4-5`     | `claude-sonnet-4.5`    | 200k           |
 | `claude-opus-4-8`       | `claude-opus-4.8`      | 1M             |
 | `claude-opus-4-8[1m]`   | `claude-opus-4.8`      | 1M             |
 | `claude-opus-4-7`       | `claude-opus-4.7`      | 1M             |
 | `claude-opus-4-7[1m]`   | `claude-opus-4.7`      | 1M             |
 | `claude-opus-4-6`       | `claude-opus-4.6`      | 1M             |
 | `claude-opus-4-6[1m]`   | `claude-opus-4.6`      | 1M             |
-| `claude-opus-4.5`       | `claude-opus-4.5`      | 200k           |
-| `claude-haiku-4.5`      | `claude-haiku-4.5`     | 200k           |
+| `claude-opus-4-5`       | `claude-opus-4.5`      | 200k           |
+| `claude-haiku-4-5`      | `claude-haiku-4.5`     | 200k           |
 
-Opus 5, Opus 4.6, 4.7, 4.8, and Sonnet 5 always use 1M context (no 200k SKU exists upstream). Unlike Sonnet 4.6, `claude-opus-5` and `claude-sonnet-5` have no separate `-1m` SKU: each single SKU is always 1M. Their explicit `[1m]` aliases preserve the suffix in the response without spuriously enabling extended thinking. Thinking remains opt-in via the `context-1m` header or the `thinking` field on these always-1M aliases.
+Opus 5.5, Sonnet 5.5, Opus 5, Sonnet 5, Opus 4.6/4.7/4.8, and Sonnet 4.6 always use 1M context and have no separate `-1m` SKU: each single SKU is always 1M. The legacy `claude-sonnet-4.6-1m` / `claude-opus-4.6-1m` SKUs accept no effort and `claude-sonnet-4.5-1m` is no longer served, so the proxy never routes to them; Sonnet 4.5 is 200k only. Their explicit `[1m]` aliases preserve the suffix in the response without spuriously enabling extended thinking. Thinking remains opt-in via the `context-1m` header or the `thinking` field on these always-1M aliases.
 
-Unmatched `claude-*` models are passed through as-is. Non-claude models fall back to `claude-sonnet-4.6`.
+Dated snapshot IDs such as `claude-haiku-4-5-20251001` resolve to their undated alias (Kiro IDs are never dated); dotted Kiro IDs such as `claude-haiku-4.5` are also accepted. Unmatched `claude-*` models are passed through as-is (minus any date suffix). Non-claude models fall back to `claude-sonnet-4.6`.
 
 #### Response model ID
 
 The `model` field in `/v1/messages` responses (streaming `message_start`, non-streaming body, and tool-search path) is returned as the **Anthropic-form ID** (e.g. `claude-opus-4-7`), not the Kiro SKU (`claude-opus-4.7`).
 
-When the proxy routes to a **1M context window** (always-1M SKU such as `claude-opus-5` / `claude-opus-4.8` / `claude-opus-4.7` / `claude-opus-4.6`, or a model invoked with the `[1m]` suffix or `Anthropic-Beta: context-1m` header), a trailing `[1m]` is appended to the response model ID (e.g. `claude-opus-5[1m]`). Claude Code's client-side context-window logic matches `/\[1m\]/i` on the response model to pick the 1M window — without the suffix it defaults to 200k and auto-compacts at ~160k even when upstream actually has 1M of context.
+When the proxy routes to a **1M context window** (always-1M SKU such as `claude-opus-5.5` / `claude-sonnet-5.5` / `claude-opus-5` / `claude-opus-4.8` / `claude-opus-4.7` / `claude-opus-4.6` / `claude-sonnet-4.6`, or a model invoked with the `[1m]` suffix or `Anthropic-Beta: context-1m` header), a trailing `[1m]` is appended to the response model ID (e.g. `claude-opus-5[1m]`). Claude Code's client-side context-window logic matches `/\[1m\]/i` on the response model to pick the 1M window — without the suffix it defaults to 200k and auto-compacts at ~160k even when upstream actually has 1M of context.
 
 Note: `[1m]` has different meanings on request vs. response. On the **request** `model` it is a client-supplied thinking-opt-in signal (and is stripped before upstream routing). On the **response** `model` it is purely a context-window advertisement for Claude Code and does not imply that extended thinking was enabled.
 

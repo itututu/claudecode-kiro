@@ -32,6 +32,26 @@ func normalizeThinkingSuffix(model string) string {
 	return model
 }
 
+// stripDateSuffix removes a trailing Anthropic snapshot date (for example
+// claude-haiku-4-5-20251001 -> claude-haiku-4-5), keeping any [1m] marker.
+// Kiro model IDs are never dated, so a dated ID must resolve to its alias.
+func stripDateSuffix(model string) string {
+	base, suffix := model, ""
+	if before, ok := strings.CutSuffix(model, ThinkingSuffix); ok {
+		base, suffix = before, ThinkingSuffix
+	}
+	const dateLen = len("-20060102")
+	if len(base) <= dateLen || base[len(base)-dateLen] != '-' {
+		return model
+	}
+	for _, c := range base[len(base)-dateLen+1:] {
+		if c < '0' || c > '9' {
+			return model
+		}
+	}
+	return base[:len(base)-dateLen] + suffix
+}
+
 // Context window sizes.
 const (
 	DefaultContextWindowSize  = 200_000
@@ -42,20 +62,26 @@ const (
 // Uses exact key matching against both Anthropic and Kiro fields (first match wins).
 // Order matters: specific entries must precede legacy aliases that share the same Kiro value.
 var modelMapOrdered = []Mapping{
+	{Anthropic: "claude-opus-5-5[1m]", Kiro: "claude-opus-5.5", Kiro1M: "claude-opus-5.5"},
+	{Anthropic: "claude-sonnet-5-5[1m]", Kiro: "claude-sonnet-5.5", Kiro1M: "claude-sonnet-5.5"},
 	{Anthropic: "claude-opus-5[1m]", Kiro: "claude-opus-5", Kiro1M: "claude-opus-5"},
 	{Anthropic: "claude-opus-4-8[1m]", Kiro: "claude-opus-4.8", Kiro1M: "claude-opus-4.8"},
 	{Anthropic: "claude-opus-4-7[1m]", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
 	{Anthropic: "claude-opus-4-6[1m]", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6"},
 	{Anthropic: "claude-sonnet-5[1m]", Kiro: "claude-sonnet-5", Kiro1M: "claude-sonnet-5"},
+	{Anthropic: "claude-sonnet-4-6[1m]", Kiro: "claude-sonnet-4.6", Kiro1M: "claude-sonnet-4.6"},
+	{Anthropic: "claude-opus-5-5", Kiro: "claude-opus-5.5", Kiro1M: "claude-opus-5.5"},
+	{Anthropic: "claude-sonnet-5-5", Kiro: "claude-sonnet-5.5", Kiro1M: "claude-sonnet-5.5"},
 	{Anthropic: "claude-opus-5", Kiro: "claude-opus-5", Kiro1M: "claude-opus-5"},
 	{Anthropic: "claude-opus-4-8", Kiro: "claude-opus-4.8", Kiro1M: "claude-opus-4.8"},
 	{Anthropic: "claude-opus-4-7", Kiro: "claude-opus-4.7", Kiro1M: "claude-opus-4.7"},
 	{Anthropic: "claude-sonnet-5", Kiro: "claude-sonnet-5", Kiro1M: "claude-sonnet-5"},
-	{Anthropic: "claude-sonnet-4-6", Kiro: "claude-sonnet-4.6", Kiro1M: "claude-sonnet-4.6-1m"},
-	{Anthropic: "claude-sonnet-4.5", Kiro: "claude-sonnet-4.5", Kiro1M: "claude-sonnet-4.5-1m"},
+	{Anthropic: "claude-sonnet-4-6", Kiro: "claude-sonnet-4.6", Kiro1M: "claude-sonnet-4.6"},
 	{Anthropic: "claude-opus-4-6", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6"},
-	{Anthropic: "claude-opus-4.5", Kiro: "claude-opus-4.5"},
-	{Anthropic: "claude-haiku-4.5", Kiro: "claude-haiku-4.5"},
+	// 200k-only SKUs: Kiro no longer serves a claude-sonnet-4.5-1m variant.
+	{Anthropic: "claude-sonnet-4-5", Kiro: "claude-sonnet-4.5"},
+	{Anthropic: "claude-opus-4-5", Kiro: "claude-opus-4.5"},
+	{Anthropic: "claude-haiku-4-5", Kiro: "claude-haiku-4.5"},
 }
 
 const DefaultModel = "claude-sonnet-4.6"
@@ -134,7 +160,7 @@ func effectiveMappings() []Mapping {
 // Upstream `kiroModel` is never `[1m]`-suffixed — it always comes from
 // mapping tables. KIROCC_MODEL_MAPPINGS env var can override mappings.
 func Resolve(model string, context1M bool) (kiroModel string, thinking bool, contextWindowSize int, anthropicModel string) {
-	model = normalizeThinkingSuffix(model)
+	model = stripDateSuffix(normalizeThinkingSuffix(model))
 	var matchedWindowSize int
 	var matchedKiro1M string
 	var matchedAnthropic string

@@ -132,6 +132,64 @@ func TestE2E_ThinkingWithoutEffort_SendsDefaultEffort(t *testing.T) {
 	}
 }
 
+// TestE2E_EffortPerModel verifies the effort forwarded upstream for every
+// Claude model in the Kiro catalog, matching the per-model enums kiro-cli
+// 2.27.1 validates against (xhigh honored, clamped to max, or omitted).
+func TestE2E_EffortPerModel(t *testing.T) {
+	tests := []struct {
+		model        string
+		wantUpstream string
+		wantEffort   string // "" means additionalModelRequestFields omitted
+	}{
+		{"claude-opus-5-5", "claude-opus-5.5", "xhigh"},
+		{"claude-sonnet-5-5", "claude-sonnet-5.5", "xhigh"},
+		{"claude-sonnet-5-5[1m]", "claude-sonnet-5.5", "xhigh"},
+		{"claude-opus-5", "claude-opus-5", "xhigh"},
+		{"claude-sonnet-5", "claude-sonnet-5", "xhigh"},
+		{"claude-opus-4-8", "claude-opus-4.8", "xhigh"},
+		{"claude-opus-4-7", "claude-opus-4.7", "xhigh"},
+		{"claude-opus-4-6", "claude-opus-4.6", "max"},
+		{"claude-sonnet-4-6", "claude-sonnet-4.6", "max"},
+		{"claude-sonnet-4-6[1m]", "claude-sonnet-4.6", "max"},
+		{"claude-sonnet-4-5", "claude-sonnet-4.5", ""},
+		{"claude-opus-4-5", "claude-opus-4.5", ""},
+		{"claude-haiku-4-5-20251001", "claude-haiku-4.5", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			p1 := mustJSON(map[string]string{"content": "ok"})
+			client := &capturingClient{events: []any{"assistantResponseEvent", p1}}
+
+			srv := newE2EServer(t, client)
+			defer srv.Close()
+
+			body := `{"model":"` + tt.model + `","messages":[{"role":"user","content":"hi"}],"output_config":{"effort":"xhigh"},"stream":false}`
+			resp := postMessages(t, srv.URL, body)
+			defer func() { _ = resp.Body.Close() }()
+
+			requireStatus(t, resp, 200)
+			requireCaptured(t, client)
+
+			if got := client.captured.ConversationState.CurrentMessage.UserInputMessage.ModelID; got != tt.wantUpstream {
+				t.Fatalf("upstream model = %q, want %q", got, tt.wantUpstream)
+			}
+			amrf := client.captured.AdditionalModelRequestFields
+			if tt.wantEffort == "" {
+				if amrf != nil {
+					t.Fatalf("additionalModelRequestFields = %+v, want omitted", amrf)
+				}
+				return
+			}
+			if amrf == nil || amrf.OutputConfig == nil {
+				t.Fatal("expected additionalModelRequestFields.output_config to be forwarded")
+			}
+			if amrf.OutputConfig.Effort != tt.wantEffort {
+				t.Fatalf("effort = %q, want %q", amrf.OutputConfig.Effort, tt.wantEffort)
+			}
+		})
+	}
+}
+
 func TestE2E_EnvStateFromSystemPrompt(t *testing.T) {
 	p1 := mustJSON(map[string]string{"content": "ok"})
 	client := &capturingClient{events: []any{"assistantResponseEvent", p1}}
