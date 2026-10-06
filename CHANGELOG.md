@@ -22,6 +22,9 @@ pre-release tags based on the upstream kirocc version.
   no Kiro inference host.
 - Kiro-style always-1M aliases such as `claude-opus-4.8[1m]` and `[1M]` now
   resolve exactly without accidentally enabling thinking.
+- `claude-opus-5-5` / `claude-opus-5-5[1m]` now map to Kiro's always-1M
+  `claude-opus-5.5` SKU with the five-level effort enum, so `high`/`xhigh`/`max`
+  are forwarded natively instead of dropped (no `KIROCC_MODEL_MAPPINGS` needed).
 - Claude Code's new default `claude-opus-5[1m]` model now maps explicitly to
   Kiro's `claude-opus-5` SKU with the supported five-level effort enum; its
   context suffix no longer falls through the legacy thinking path.

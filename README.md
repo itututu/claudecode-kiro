@@ -687,14 +687,14 @@ Effort 解析规则：
 
 允许的级别：
 
-- `claude-opus-5`、`claude-opus-4.8`、`claude-opus-4.7`、`claude-sonnet-5`：
+- `claude-opus-5.5`、`claude-opus-5`、`claude-opus-4.8`、`claude-opus-4.7`、`claude-sonnet-5`：
   `low`、`medium`、`high`、`xhigh`、`max`。
 - `claude-opus-4.6`、`claude-sonnet-4.6` 及 `-1m` 版本：
   `low`、`medium`、`high`、`max`。
 - 其他模型不发送 `additionalModelRequestFields`。
 
 `thinking.budget_tokens` 会被接受，但 reasoning depth 完全由 Effort 表达。
-对于始终 1M 的 Opus 5、Opus 4.6/4.7/4.8 和 Sonnet 5，请求模型名中的 `[1m]`
+对于始终 1M 的 Opus 5.5、Opus 5、Opus 4.6/4.7/4.8 和 Sonnet 5，请求模型名中的 `[1m]`
 只是上下文窗口别名，不会单独启用 Thinking。
 
 ### Tool Search
@@ -719,6 +719,8 @@ Kiro 推理后端不原生支持 Anthropic Tool Search，因此由网关实现�
 
 | 输入模型 | Kiro 模型 | 上下文窗口 |
 | --- | --- | --- |
+| `claude-opus-5-5` | `claude-opus-5.5` | 1M |
+| `claude-opus-5-5[1m]` | `claude-opus-5.5` | 1M |
 | `claude-opus-5` | `claude-opus-5` | 1M |
 | `claude-opus-5[1m]` | `claude-opus-5` | 1M |
 | `claude-sonnet-5` | `claude-sonnet-5` | 1M |
@@ -737,7 +739,7 @@ Kiro 推理后端不原生支持 Anthropic Tool Search，因此由网关实现�
 | `claude-haiku-4.5` | `claude-haiku-4.5` | 200k |
 
 没有匹配的 `claude-*` 模型会原样传递；非 Claude 模型 fallback 到
-`claude-sonnet-4.6`。Opus 5、Opus 4.6/4.7/4.8 和 Sonnet 5 只有 1M SKU；响应模型名
+`claude-sonnet-4.6`。Opus 5.5、Opus 5、Opus 4.6/4.7/4.8 和 Sonnet 5 只有 1M SKU；响应模型名
 会保留/补充 `[1m]`，让 Claude Code 正确识别 1M 上下文，避免按 200k 提前
 自动压缩。响应中的 `[1m]` 只用于声明上下文窗口，不代表已启用 Thinking。
 

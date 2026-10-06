@@ -17,6 +17,50 @@ func TestResolve(t *testing.T) {
 		wantAnthropicModel string
 	}{
 		{
+			name:               "claude-opus-5-5 uses 1m context without thinking",
+			model:              "claude-opus-5-5",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5-5[1m] exact-match preserves suffix without thinking",
+			model:              "claude-opus-5-5[1m]",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5-5 uppercase [1M] is normalized without thinking",
+			model:              "claude-opus-5-5[1M]",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5.5 Kiro ID maps to Anthropic form",
+			model:              "claude-opus-5.5",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5.5[1m] Kiro-style context alias without thinking",
+			model:              "claude-opus-5.5[1m]",
+			wantKiroModel:      "claude-opus-5.5",
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
+			name:               "claude-opus-5-5[1m] with context1M enables thinking",
+			model:              "claude-opus-5-5[1m]",
+			context1M:          true,
+			wantKiroModel:      "claude-opus-5.5",
+			wantThinking:       true,
+			wantContextWindow:  ThinkingContextWindowSize,
+			wantAnthropicModel: "claude-opus-5-5[1m]",
+		},
+		{
 			name:               "claude-opus-5 uses 1m context without thinking",
 			model:              "claude-opus-5",
 			wantKiroModel:      "claude-opus-5",
@@ -328,6 +372,10 @@ func TestListModels(t *testing.T) {
 		{
 			name:       "claude-sonnet-5 is listed exactly once (both alias rows dedupe to one Kiro value)",
 			checkModel: "claude-sonnet-5",
+		},
+		{
+			name:       "claude-opus-5.5 is listed exactly once (both alias rows dedupe to one Kiro value)",
+			checkModel: "claude-opus-5.5",
 		},
 		{
 			name:       "claude-opus-5 is listed exactly once (both alias rows dedupe to one Kiro value)",
