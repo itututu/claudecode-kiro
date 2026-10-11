@@ -1,7 +1,6 @@
 package reqconv
 
 import (
-	"log/slog"
 	"strings"
 
 	"github.com/d-kuro/kirocc/internal/anthropic"
@@ -34,10 +33,7 @@ func buildHistory(msgs []anthropic.Message, nameMap *ToolNameMap) []kiroproto.Hi
 			userMsg := &kiroproto.HistoryUserInputMessage{
 				Content: content,
 				Origin:  kiroproto.OriginKiroCLI,
-			}
-			// Warn if images are present in history — Kiro history type does not support images.
-			if images := ExtractImages(msg.Content); len(images) > 0 {
-				slog.Warn("images in history messages are not supported and will be dropped", "image_count", len(images))
+				Images:  ExtractImages(msg.Content),
 			}
 			toolResults := ExtractToolResults(msg.Content)
 			// Reorder tool results to match the preceding assistant's tool_use order.

@@ -409,6 +409,7 @@ Windows 对应命令为 `.\scripts\uninstall.ps1` 和
 
 - **Anthropic Messages API 兼容**：支持 `/v1/messages`（流式/非流式）、`/v1/messages/count_tokens` 和 `/v1/models`。
 - **请求/响应协议转换**：Anthropic JSON/SSE 与 Kiro JSON/AWS Event Stream 双向转换。
+- **图片输入**：在对话历史中保留 base64 图片，并转发 `Read` 等工具返回的图片，支持流式和非流式请求。
 - **自动认证管理**：读取 Kiro CLI SQLite 凭据并自动刷新 Social/OIDC Token，也支持 Kiro API Key。
 - **模型映射**：将 Anthropic 风格模型名映射为 Kiro SKU，可通过环境变量覆盖。
 - **扩展思考**：支持 `[1m]`、`thinking` 和 `output_config.effort`，原生转发并按模型枚举校验/收敛 effort。
@@ -743,6 +744,9 @@ Kiro 推理后端不原生支持 Anthropic Tool Search，因此由网关实现�
 
 ## 已知边界
 
+- 图片输入支持 base64 来源；URL 图片会被跳过。消息和 Token Count 请求的
+  JSON 总大小上限为 32 MiB，包含编码后的图片和历史；超过上限返回 HTTP 413。
+  Kiro 自身的图片和模型限制仍然适用。
 - Windows 原生支持面向 Windows 11 x64。CI 会解析 PowerShell、运行 Windows
   Go 测试并构建 PE 文件，但带真实凭据的 Windows 全新安装 E2E 仍取决于环境。
 - 原生 WebSearch 与其他客户端 Tool 混合的手工请求返回 HTTP 400。

@@ -19,11 +19,14 @@ import (
 	"github.com/d-kuro/kirocc/internal/tokencount"
 )
 
+// maxRequestBytes bounds the complete JSON body, including base64 images and history.
+const maxRequestBytes = 32 << 20
+
 // HandleCountTokens serves POST /v1/messages/count_tokens.
 func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 	req, err := parseAndValidateRequest(r.Context(), w, r)
 	if err != nil {
-		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+		writeRequestValidationError(w, err)
 		return
 	}
 
@@ -78,7 +81,10 @@ func (s *Service) HandleCountTokens(w http.ResponseWriter, r *http.Request) {
 
 // parseAndValidateRequest decodes and validates an Anthropic request from the HTTP body.
 func parseAndValidateRequest(ctx context.Context, w http.ResponseWriter, r *http.Request) (*anthropic.Request, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
+	if r.ContentLength > maxRequestBytes {
+		return nil, &http.MaxBytesError{Limit: maxRequestBytes}
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBytes)
 	var req anthropic.Request
 	if slog.Default().Enabled(ctx, slog.LevelDebug) {
 		raw, err := io.ReadAll(r.Body)

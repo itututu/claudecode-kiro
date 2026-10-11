@@ -8,6 +8,8 @@ pre-release tags based on the upstream kirocc version.
 
 ### Changed
 
+- Messages and token-count requests now accept up to 32 MiB of JSON, including
+  base64 images and conversation history; larger requests return HTTP 413.
 - The public repository and current project branding are now `claudecode-kiro`
   / ClaudeCode Kiro. Existing release tags, artifact names, commands, and local
   installation paths remain unchanged for compatibility.
@@ -16,6 +18,10 @@ pre-release tags based on the upstream kirocc version.
 
 ### Fixed
 
+- Pasted images remain on their original user turns through follow-ups and
+  tool calls instead of being dropped from conversation history.
+- Images returned by `Read` and other tools are forwarded on the user turn
+  carrying the tool result, including when tool results are converted to text.
 - `KIRO_API_REGION` now overrides runtime and MCP endpoint routing for Kiro CLI
   database credentials as well as API-key auth, while credential refresh keeps
   using the original login region. This prevents 502s when the login region has
