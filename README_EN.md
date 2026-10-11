@@ -395,6 +395,7 @@ Windows equivalents are `.\scripts\uninstall.ps1` and
 - **Anthropic Messages API compatible** — Supports `/v1/messages` (streaming / non-streaming), `/v1/messages/count_tokens`, and `/v1/models`
 - **Request conversion** — Automatically converts Anthropic API requests to Kiro API (AWS Event Stream) format
 - **Response conversion** — Converts Kiro event streams back to Anthropic SSE format
+- **Image input** — Preserves base64 images across conversation history and forwards images returned by tools such as `Read` in streaming and non-streaming requests
 - **Automatic auth management** — Reads and refreshes Kiro CLI SQLite credentials (Social/OIDC), or uses an explicit Kiro API key and region
 - **Model mapping** — Maps Anthropic model names (e.g., `claude-sonnet-4-6`) to Kiro model names. Customizable via environment variable
 - **Extended Thinking** — Enable via the `[1m]` suffix, the `thinking` field, or `output_config.effort`. Reasoning depth travels natively as `additionalModelRequestFields.output_config.effort` (validated against each model's enum; defaults to `medium` for effort-capable models when thinking is on without an explicit effort)
@@ -790,6 +791,10 @@ Note: `[1m]` has different meanings on request vs. response. On the **request** 
 
 ## Known limitations
 
+- Image input supports base64 sources; URL image sources are skipped. Messages
+  and token-count requests have a 32 MiB total JSON limit, including encoded
+  images and history; larger requests return HTTP 413. Kiro's own image and
+  model limits still apply.
 - Native Windows support targets Windows 11 x64. PowerShell syntax, Windows Go
   tests, and PE builds run in CI, but a credentialed clean-install E2E on
   Windows remains environment-dependent.

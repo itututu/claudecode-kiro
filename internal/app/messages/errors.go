@@ -3,12 +3,23 @@ package messages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 )
+
+func writeRequestValidationError(w http.ResponseWriter, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		httpx.WriteError(w, http.StatusRequestEntityTooLarge, errTypeInvalidRequest,
+			fmt.Sprintf("request body exceeds %d MiB limit; reduce image size or conversation history", maxRequestBytes>>20))
+		return
+	}
+	httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+}
 
 // Re-exports of httpx error type constants so in-package callers stay concise.
 const (

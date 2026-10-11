@@ -14,9 +14,10 @@ const (
 )
 
 // Normalize runs the normalization pipeline on messages. Ordering matters:
-// tool content handling runs first (it inspects original block shapes), then
-// role normalization, merging, and alternation fixups.
+// image promotion precedes tool content handling, then role normalization,
+// merging, and alternation fixups.
 func Normalize(msgs []anthropic.Message, hasTools bool) []anthropic.Message {
+	msgs = promoteToolResultImages(msgs)
 	msgs = textualizeToolContent(msgs, hasTools)
 	msgs = normalizeRoles(msgs)
 	msgs = mergeAdjacentSameRole(msgs)

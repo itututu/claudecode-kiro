@@ -25,7 +25,7 @@ func (s *Service) HandleMessages(w http.ResponseWriter, r *http.Request) {
 	req, err := parseAndValidateRequest(ctx, w, r)
 	if err != nil {
 		slog.WarnContext(ctx, "invalid request", "trace_id", short, "err", err)
-		httpx.WriteError(w, http.StatusBadRequest, errTypeInvalidRequest, err.Error())
+		writeRequestValidationError(w, err)
 		return
 	}
 

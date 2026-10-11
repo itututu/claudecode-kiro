@@ -157,6 +157,7 @@ type HistoryUserInputMessage struct {
 	ModelID                 string                   `json:"modelId,omitempty"`
 	Origin                  string                   `json:"origin,omitempty"`
 	UserInputMessageContext *UserInputMessageContext `json:"userInputMessageContext,omitempty"`
+	Images                  []Image                  `json:"images,omitempty"`
 	CachePoint              *CachePoint              `json:"cachePoint,omitempty"`
 }
 
