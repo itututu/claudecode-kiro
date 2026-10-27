@@ -138,8 +138,8 @@ func TestHTTPClient_Retry403_WithRefresh(t *testing.T) {
 
 	c := NewHTTPClient(
 		WithBaseURL(srv.URL),
-		WithTokenRefresher(func(ctx context.Context) (string, error) {
-			return "new-token", nil
+		WithTokenRefresher(func(ctx context.Context) (RefreshedCredentials, error) {
+			return RefreshedCredentials{AccessToken: "new-token"}, nil
 		}),
 	)
 	payload := &kiroproto.Payload{ConversationState: kiroproto.ConversationState{AgentTaskType: "vibe", ChatTriggerType: "MANUAL", CurrentMessage: kiroproto.CurrentMessage{UserInputMessage: kiroproto.UserInputMessage{Content: "Hi"}}}}

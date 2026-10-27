@@ -36,10 +36,11 @@ func (s *Service) callAndHandle(ctx context.Context, w http.ResponseWriter, sess
 	apiResp, err := s.client.GenerateAssistantResponse(ctx, inv.creds.AccessToken, inv.payload, inv.creds.Region)
 	if err != nil {
 		logUpstreamError(ctx, short, err)
+		final := classifyUpstreamHTTPError(err, "upstream API error")
 		if session != nil {
-			_ = session.WriteFinalError(newStreamFinalError(http.StatusBadGateway, errTypeAPI, "upstream API error"), nil)
+			_ = session.WriteFinalError(final, nil)
 		} else {
-			httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "upstream API error")
+			httpx.WriteError(w, final.status, final.jsonType, final.jsonMessage)
 		}
 		return ""
 	}

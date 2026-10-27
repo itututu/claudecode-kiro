@@ -23,8 +23,18 @@ validate_removal_root() {
 }
 
 validate_removal_root "$install_root" "clawgod-kirocc"
-rm -f "$user_bin_dir/claude-kiro"
+rm -f "$user_bin_dir/claude-kiro" "$user_bin_dir/kiroclaude"
 rm -rf "$install_root"
+
+# Startup locks and process records describe a gateway binary that no longer
+# exists after the removal above, so they go with it. They are diagnostics, never
+# authority, so nothing here inspects or signals a running gateway: a gateway
+# started before this uninstall keeps serving until it exits on its own.
+lock_dir="$HOME/.cache/claudecode-kiro"
+if [[ -d "$lock_dir" ]]; then
+  validate_removal_root "$lock_dir" "claudecode-kiro"
+  rm -rf "$lock_dir"
+fi
 
 if [[ "$purge_state" == true ]]; then
   validate_removal_root "$state_root" ".clawgod-kirocc"

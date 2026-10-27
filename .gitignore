@@ -55,3 +55,38 @@ cli.original.js
 .claude/*
 !.claude/skills/
 !.claude/skills/**
+
+# Build artifacts
+kirocc
+kirosshd
+test_launcher
+*.test
+bin/
+vendor/
+
+# macOS
+.DS_Store
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Misc
+*.log
+*.tmp
+
+# Build artifacts (cross-platform)
+kirocc-arm64
+kirocc-linux
+kirosshd-arm64
+kirosshd-linux
+cmd/kirocc
+cmd/kirosshd

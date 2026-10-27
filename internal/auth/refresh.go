@@ -66,6 +66,30 @@ type AuthManager struct {
 // from the Kiro CLI database.
 func (m *AuthManager) UsesAPIKey() bool { return m.apiKey != "" }
 
+// AuthType reports which credential source is in effect: AuthTypeAPIKey, or
+// the database credential's own type (AuthTypeSocial / AuthTypeIDC). It returns
+// an empty string when no credential can be read, so a caller reporting it
+// cannot accidentally claim an auth mode that does not exist.
+//
+// Only the non-secret type is returned; no token, profile, or expiry leaves
+// this call.
+func (m *AuthManager) AuthType() string {
+	if m.apiKey != "" {
+		return AuthTypeAPIKey
+	}
+	m.mu.Lock()
+	cached := m.cached
+	m.mu.Unlock()
+	if cached != nil {
+		return cached.AuthType
+	}
+	creds, err := m.readFromDB()
+	if err != nil || creds == nil {
+		return ""
+	}
+	return creds.AuthType
+}
+
 func newDefaultHTTPClient() *http.Client {
 	return &http.Client{Timeout: 30 * time.Second}
 }

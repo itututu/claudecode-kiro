@@ -4,7 +4,7 @@ set -uo pipefail
 install_root="${CLAWGOD_KIROCC_INSTALL_ROOT:-$HOME/.local/share/clawgod-kirocc}"
 state_root="${CLAWGOD_KIROCC_STATE_ROOT:-$HOME/.clawgod-kirocc}"
 user_bin_dir="${CLAWGOD_KIROCC_BIN_DIR:-$HOME/.local/bin}"
-gateway_port="${KIROCC_PORT:-3457}"
+gateway_port="${KIROCC_PORT:-3456}"
 gateway_url="${KIROCC_URL:-http://127.0.0.1:${gateway_port}}"
 if [[ -n "${KIROCC_URL:-}" ]]; then
   gateway_url_label='<custom KIROCC_URL; value redacted>'
@@ -93,7 +93,7 @@ printf '  state root:   %s\n' "$state_root"
 printf '  runtime:      %s\n' "$runtime_kind"
 printf '  gateway URL:  %s\n\n' "$gateway_url_label"
 
-required_commands=(go curl node)
+required_commands=(go curl node python3)
 if [[ "$runtime_kind" == "clawgod" ]]; then
   required_commands+=(bun rg)
 fi
@@ -110,6 +110,7 @@ fi
 
 official_claude="$(command -v claude 2>/dev/null || true)"
 isolated_launcher="$(command -v claude-kiro 2>/dev/null || true)"
+shared_entry_point="$(command -v kiroclaude 2>/dev/null || true)"
 if [[ -n "$official_claude" ]]; then
   pass "official Claude command: $official_claude"
 else
@@ -119,6 +120,20 @@ if [[ -n "$isolated_launcher" ]]; then
   pass "isolated launcher: $isolated_launcher"
 else
   fail "claude-kiro not found on PATH (expected under $user_bin_dir)"
+fi
+if [[ -n "$shared_entry_point" ]]; then
+  pass "shared entry point: $shared_entry_point"
+  # kiroclaude is installed as a link to claude-kiro, so both must launch the
+  # same isolated launcher rather than two independently installed copies.
+  if [[ -n "$isolated_launcher" ]]; then
+    if [[ "$shared_entry_point" -ef "$isolated_launcher" ]]; then
+      pass 'kiroclaude and claude-kiro launch the same isolated launcher'
+    else
+      fail 'kiroclaude and claude-kiro are separate files; rerun the installer'
+    fi
+  fi
+else
+  fail "kiroclaude not found on PATH (expected under $user_bin_dir)"
 fi
 if [[ -n "$official_claude" && -n "$isolated_launcher" ]]; then
   if [[ "$official_claude" == "$isolated_launcher" ]]; then
@@ -206,10 +221,65 @@ case "$gateway_port" in
     ;;
 esac
 
-if curl -fsS --max-time 1 "${gateway_url%/}/health" >/dev/null 2>&1; then
+if curl -fsS --noproxy '*' --max-time 1 "${gateway_url%/}/health" >/dev/null 2>&1; then
   pass 'gateway health endpoint is reachable'
+  # /health answers unauthenticated and proves only that something is listening.
+  # The serving contract lives behind the local bearer, so read it from the
+  # status endpoint, which carries no credential, PID, path, prompt, or model
+  # response and can never change readiness. Reading it spends no inference.
+  status_document="$(curl -fsS --noproxy '*' --max-time 2 \
+    -H "Authorization: Bearer ${KIROCC_API_KEY:-kiro-local}" \
+    "${gateway_url%/}/v1/kirocc/status" 2>/dev/null)" || status_document=""
+  if [[ -z "$status_document" ]]; then
+    warn 'authenticated gateway status is unavailable; the listener predates the status endpoint or does not accept the local bearer'
+  else
+    status_summary="$(printf '%s' "$status_document" | node -e '
+let raw = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { raw += chunk; });
+process.stdin.on("end", () => {
+  let document;
+  try { document = JSON.parse(raw); } catch { process.exit(3); }
+  if (document.service !== "kirocc" || document.protocol_version !== 2) process.exit(4);
+  const fields = ["auth_type", "region", "inference_host", "model_mapping_mode",
+                  "upstream_probe_state", "upstream_ready"];
+  process.stdout.write(fields.map((field) => field + "=" + document[field]).join(" "));
+  process.exit(document.upstream_ready === true ? 0 : 5);
+});
+' 2>/dev/null)"
+    case "$?" in
+      0) pass "gateway serving contract: $status_summary" ;;
+      5) warn "gateway is serving but upstream readiness is unproven: $status_summary" ;;
+      *) fail 'gateway status is not the expected kirocc protocol 2 document' ;;
+    esac
+  fi
 else
-  warn 'gateway is not currently reachable; this is normal when claude-kiro is closed'
+  warn 'gateway is not currently reachable; run kiroclaude --gateway-start'
+fi
+
+record_path="$HOME/.cache/claudecode-kiro/gateway-${gateway_port}.json"
+if [[ -f "$record_path" ]]; then
+  # Diagnostics only. A record is never readiness authority and never authorizes
+  # a signal, so anything it says here is informational, never pass or fail.
+  record_summary="$(node -e '
+const fs = require("fs");
+let document;
+try { document = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(3); }
+if (typeof document.gateway_sha256 === "string") {
+  document.gateway_sha256 = document.gateway_sha256.slice(0, 12) + "...";
+}
+// A record written by an older launcher carries fewer fields. Report what is
+// there rather than inventing an "undefined" for what is not.
+const present = ["pid", "port", "region", "spawned_at", "gateway_sha256"]
+  .filter((field) => document[field] !== undefined && document[field] !== null)
+  .map((field) => field + "=" + document[field]);
+process.stdout.write(present.length > 0 ? present.join(" ") : "record carries no recognized field");
+' "$record_path" 2>/dev/null)" || record_summary=""
+  if [[ -n "$record_summary" ]]; then
+    printf '\nLast recorded gateway spawn (informational): %s\n' "$record_summary"
+  else
+    printf '\nLast recorded gateway spawn (informational): unreadable record at %s\n' "$record_path"
+  fi
 fi
 
 printf '\nSummary: %d pass, %d warning, %d failure\n' \

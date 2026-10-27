@@ -107,6 +107,9 @@ func (c *HTTPClient) SearchWeb(ctx context.Context, token, profileARN, region, q
 	}
 
 	currentToken := token
+	currentProfileARN := profileARN
+	credentialTokens := []string{token}
+	authRetried := false
 	invocationID := uuid.NewString()
 	traceID, short := logging.TraceIDs(ctx)
 
@@ -126,8 +129,8 @@ func (c *HTTPClient) SearchWeb(ctx context.Context, token, profileARN, region, q
 		req.Header.Set("x-amzn-codewhisperer-optout", "false")
 		req.Header.Set("amz-sdk-invocation-id", invocationID)
 		req.Header.Set("amz-sdk-request", fmt.Sprintf("attempt=%d; max=%d", attempt+1, maxAttempts))
-		if profileARN != "" {
-			req.Header.Set("x-amzn-kiro-profile-arn", profileARN)
+		if currentProfileARN != "" {
+			req.Header.Set("x-amzn-kiro-profile-arn", currentProfileARN)
 		}
 
 		slog.DebugContext(ctx, "kiro MCP request headers",
@@ -152,31 +155,48 @@ func (c *HTTPClient) SearchWeb(ctx context.Context, token, profileARN, region, q
 			return nil, fmt.Errorf("do Kiro MCP request: %w", err)
 		}
 
-		body, readErr := readMCPResponseBody(resp.Body)
-		if readErr != nil {
-			c.recordError(ctx, readErr)
-			return nil, readErr
+		resp.Header = safeResponseHeaders(resp.Header, credentialTokens)
+		var errBody string
+		if resp.StatusCode != http.StatusOK {
+			errBody = readSafeErrorBody(resp.Body, credentialTokens)
 		}
 
 		switch {
 		case resp.StatusCode == http.StatusOK:
+			body, readErr := readMCPResponseBody(resp.Body)
+			if readErr != nil {
+				c.recordError(ctx, readErr)
+				return nil, readErr
+			}
 			result, parseErr := parseMCPWebSearchResponse(body)
 			if parseErr != nil {
+				parseErr = fmt.Errorf("%s", redactCredentials(parseErr.Error(), credentialTokens))
 				c.recordError(ctx, parseErr)
 				return nil, parseErr
 			}
 			return result, nil
 
 		case resp.StatusCode == http.StatusForbidden:
-			if attempt < maxAttempts-1 && c.tokenRefresher != nil {
-				newToken, refreshErr := c.tokenRefresher(ctx)
-				if refreshErr == nil {
-					currentToken = newToken
-					slog.InfoContext(ctx, "kiro MCP: 403 received, token refreshed",
+			// Same bounded single retry as the runtime client: bearer and
+			// profile ARN move together, and an unchanged snapshot is not worth
+			// a second request.
+			if !c.apiKeyAuth && !authRetried && attempt < maxAttempts-1 && c.tokenRefresher != nil {
+				authRetried = true
+				refreshed, refreshErr := c.tokenRefresher(ctx)
+				nextToken, nextProfileARN := refreshed.resolve(currentToken, currentProfileARN)
+				switch {
+				case refreshErr != nil:
+					slog.WarnContext(ctx, "kiro MCP: token refresh failed", "trace_id", short, "err", redactCredentials(refreshErr.Error(), credentialTokens))
+				case nextToken == currentToken && nextProfileARN == currentProfileARN:
+					slog.InfoContext(ctx, "kiro MCP: 403 received, credential snapshot unchanged",
+						"trace_id", short, "attempt", attempt+1, "max", maxAttempts)
+				default:
+					currentToken, currentProfileARN = nextToken, nextProfileARN
+					credentialTokens = append(credentialTokens, nextToken)
+					slog.InfoContext(ctx, "kiro MCP: 403 received, credential snapshot refreshed",
 						"trace_id", short, "attempt", attempt+1, "max", maxAttempts)
 					continue
 				}
-				slog.WarnContext(ctx, "kiro MCP: token refresh failed", "trace_id", short, "err", refreshErr)
 			}
 
 		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
@@ -195,8 +215,8 @@ func (c *HTTPClient) SearchWeb(ctx context.Context, token, profileARN, region, q
 		ue := &UpstreamError{
 			Status:      resp.StatusCode,
 			ContentType: resp.Header.Get("Content-Type"),
-			Exception:   resolveAWSException(string(body), resp.Header),
-			Body:        string(body),
+			Exception:   resolveAWSException(errBody, resp.Header),
+			Body:        errBody,
 		}
 		c.recordError(ctx, ue)
 		return nil, ue

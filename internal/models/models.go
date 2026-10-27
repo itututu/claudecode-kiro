@@ -56,6 +56,12 @@ var modelMapOrdered = []Mapping{
 	{Anthropic: "claude-opus-4-6", Kiro: "claude-opus-4.6", Kiro1M: "claude-opus-4.6"},
 	{Anthropic: "claude-opus-4.5", Kiro: "claude-opus-4.5"},
 	{Anthropic: "claude-haiku-4.5", Kiro: "claude-haiku-4.5"},
+	// Claude Code also sends Anthropic's dashed aliases and dated model IDs.
+	// Keep these after the canonical entries to preserve dotted-ID responses.
+	{Anthropic: "claude-sonnet-4-5", Kiro: "claude-sonnet-4.5", Kiro1M: "claude-sonnet-4.5-1m"},
+	{Anthropic: "claude-sonnet-4-5-20250929", Kiro: "claude-sonnet-4.5", Kiro1M: "claude-sonnet-4.5-1m"},
+	{Anthropic: "claude-haiku-4-5", Kiro: "claude-haiku-4.5"},
+	{Anthropic: "claude-haiku-4-5-20251001", Kiro: "claude-haiku-4.5"},
 }
 
 const DefaultModel = "claude-sonnet-4.6"
@@ -232,4 +238,26 @@ func ListModels() []string {
 		}
 	}
 	return result
+}
+
+// Mapping mode names reported by EffectiveMappingMode.
+const (
+	MappingModeBuiltin = "builtin"
+	MappingModeCustom  = "custom"
+)
+
+// EffectiveMappingMode reports whether listing and resolution are running on
+// the built-in table or on a caller-supplied override set.
+//
+// It is derived from the same envMappings() parse that effectiveMappings()
+// uses, so the reported mode can never disagree with the mappings actually
+// serving traffic. An unset, empty, malformed (already warned about), or
+// explicitly empty `[]` KIROCC_MODEL_MAPPINGS all collapse to zero overrides
+// and are therefore `builtin`; every successfully parsed nonempty array is
+// `custom`, even one that only repeats built-in entries.
+func EffectiveMappingMode() string {
+	if len(envMappings()) > 0 {
+		return MappingModeCustom
+	}
+	return MappingModeBuiltin
 }

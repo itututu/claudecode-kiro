@@ -101,7 +101,9 @@ func TestHTTPClient_SearchWebRefreshes403(t *testing.T) {
 
 	c := NewHTTPClient(
 		WithMCPURL(srv.URL),
-		WithTokenRefresher(func(_ context.Context) (string, error) { return "refreshed-token", nil }),
+		WithTokenRefresher(func(_ context.Context) (RefreshedCredentials, error) {
+			return RefreshedCredentials{AccessToken: "refreshed-token"}, nil
+		}),
 	)
 	if _, err := c.SearchWeb(t.Context(), "expired-token", "arn:test", "us-east-1", "q"); err != nil {
 		t.Fatal(err)

@@ -5,7 +5,7 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 install_root="${CLAWGOD_KIROCC_INSTALL_ROOT:-$HOME/.local/share/clawgod-kirocc}"
 state_root="${CLAWGOD_KIROCC_STATE_ROOT:-$HOME/.clawgod-kirocc}"
 user_bin_dir="${CLAWGOD_KIROCC_BIN_DIR:-$HOME/.local/bin}"
-gateway_port="${KIROCC_PORT:-3457}"
+gateway_port="${KIROCC_PORT:-3456}"
 clawgod_release="${CLAWGOD_RELEASE:-v1.7.5}"
 clawgod_installer_sha256="${CLAWGOD_INSTALLER_SHA256:-4a943439ae8cb858e69279d19f0d3a979968fc0a9e4c42e1d1018ae76657ce82}"
 refresh_clawgod=false
@@ -22,12 +22,13 @@ Usage: ./scripts/install.sh [--with-clawgod] [--refresh-clawgod] [--gateway-only
 
 Environment overrides:
   CLAWGOD_BIN                    Existing explicit ClawGod launcher.
+  CLAUDE_KIRO_RUNTIME_BIN         Explicit official Claude executable.
   CLAWGOD_RELEASE                ClawGod release tag (default: v1.7.5).
   CLAWGOD_INSTALLER_SHA256       Required checksum when changing the release.
   CLAWGOD_KIROCC_INSTALL_ROOT    Runtime installation root.
   CLAWGOD_KIROCC_STATE_ROOT      Isolated ClawGod state/config root.
   CLAWGOD_KIROCC_BIN_DIR         Directory for the claude-kiro launcher.
-  KIROCC_PORT                    Gateway port (default: 3457).
+  KIROCC_PORT                    Gateway port (default: 3456).
   KIROCC_DB_PATH                 Existing Kiro CLI login database.
   KIRO_API_KEY                   Kiro upstream API key; makes Kiro CLI optional.
   KIRO_API_REGION                Kiro API-key region (default: us-east-1).
@@ -59,7 +60,7 @@ if ((gateway_port_number < 1 || gateway_port_number > 65535)); then
   exit 2
 fi
 
-required_commands=(go curl node)
+required_commands=(go curl node python3)
 if [[ "$with_clawgod" == true ]]; then
   required_commands+=(bun rg)
 fi
@@ -70,15 +71,14 @@ for required_command in "${required_commands[@]}"; do
   fi
 done
 
-official_claude_command="$(command -v claude 2>/dev/null || true)"
-if [[ -z "$official_claude_command" ]]; then
+official_claude_command="${CLAUDE_KIRO_RUNTIME_BIN:-$(command -v claude 2>/dev/null || true)}"
+if [[ -z "$official_claude_command" || ! -x "$official_claude_command" || -d "$official_claude_command" ]]; then
   printf 'official Claude Code command not found\n' >&2
   exit 127
 fi
+# A leftover .orig sibling may belong to an obsolete npm or wrapper install.
+# Resolve the selected executable itself; wrappers require an explicit override.
 official_claude_candidate="$official_claude_command"
-if [[ -e "${official_claude_command}.orig" ]]; then
-  official_claude_candidate="${official_claude_command}.orig"
-fi
 official_claude_real="$(node -e 'console.log(require("fs").realpathSync(process.argv[1]))' "$official_claude_candidate")"
 
 case "$(uname -s)" in
@@ -284,138 +284,50 @@ if [[ ! -f "$state_root/claude-config/CLAUDE.md" ]]; then
 fi
 if [[ ! -f "$state_root/claude-config/settings.json" ]]; then
   install -m 0644 "$project_root/config/settings.json" "$state_root/claude-config/settings.json"
+else
+  # Installation is the only place an existing isolated profile is rewritten.
+  # The launcher refuses to serve "model": "fable", so drop exactly that
+  # selection and leave every other key, including any other model, alone.
+  python3 - "$state_root/claude-config/settings.json" <<'PYSETTINGS'
+import json, os, sys, tempfile
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    document = json.loads(path.read_text())
+except (ValueError, UnicodeError):
+    print("warning: isolated settings are not valid JSON; leaving them untouched", file=sys.stderr)
+    sys.exit(0)
+if not isinstance(document, dict) or document.get("model") != "fable":
+    sys.exit(0)
+del document["model"]
+handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=".settings-")
+with os.fdopen(handle, "w") as file:
+    file.write(json.dumps(document, indent=2) + "\n")
+os.chmod(temporary, 0o644)
+os.replace(temporary, path)
+print('migrated isolated settings: removed unservable "model": "fable"')
+PYSETTINGS
 fi
 
 launcher_path="$user_bin_dir/claude-kiro"
-cat > "$launcher_path" <<LAUNCHER
-#!/usr/bin/env bash
-set -euo pipefail
-
-kirocc_bin="\${KIROCC_BIN:-$install_root/bin/kirocc-native-websearch}"
-runtime_bin="\${CLAUDE_KIRO_RUNTIME_BIN:-\${CLAWGOD_BIN:-$runtime_bin}}"
-config_dir="\${CLAUDE_KIRO_CONFIG_DIR:-\${CLAWGOD_KIROCC_CONFIG_DIR:-$state_root/claude-config}}"
-gateway_port="\${KIROCC_PORT:-$gateway_port}"
-gateway_url="\${KIROCC_URL:-http://127.0.0.1:\${gateway_port}}"
-proxy_token="\${KIROCC_API_KEY:-dummy}"
-export KIRO_API_REGION="\${KIRO_API_REGION:-us-east-1}"
-log_file="\${TMPDIR:-/tmp}/clawgod-kirocc-gateway-\${UID}-\${gateway_port}.log"
-started_pid=""
-
-cleanup() {
-  if [[ -n "\$started_pid" ]] && kill -0 "\$started_pid" 2>/dev/null; then
-    kill "\$started_pid" 2>/dev/null || true
-    wait "\$started_pid" 2>/dev/null || true
-  fi
+launcher_impl="$install_root/bin/claude-kiro.py"
+install -m 0755 "$project_root/scripts/claude-kiro.py" "$launcher_impl"
+python3 - "$launcher_impl" "$install_root/bin/kirocc-native-websearch" "$runtime_bin" "$state_root" "$gateway_port" "$launcher_path" <<'PYLAUNCHER'
+import json
+from pathlib import Path
+import shlex
+import sys
+implementation, gateway, runtime, state, port, launcher = sys.argv[1:]
+configuration = {
+    "gateway_bin": gateway, "runtime_bin": runtime,
+    "config_dir": str(Path(state) / "claude-config"), "state_root": state,
+    "gateway_port": int(port),
 }
-trap cleanup EXIT INT TERM HUP
-
-if [[ "\${1:-}" == "update" ]]; then
-  echo "claude-kiro: updates are disabled in the isolated profile; rerun the project installer" >&2
-  exit 2
-fi
-
-gateway_accepts_token() {
-  curl -fsS --noproxy '*' --max-time 2 \
-    -H "Authorization: Bearer \$proxy_token" \
-    "\$gateway_url/v1/models" >/dev/null 2>&1
-}
-
-prepare_local_kiro_credentials() {
-  if [[ -n "\${KIRO_API_KEY:-}" ]]; then
-    return 0
-  fi
-
-  local database_path="\${KIROCC_DB_PATH:-}"
-  if [[ -z "\$database_path" ]]; then
-    case "\$(uname -s)" in
-      Darwin) database_path="\$HOME/Library/Application Support/kiro-cli/data.sqlite3" ;;
-      Linux) database_path="\$HOME/.local/share/kiro-cli/data.sqlite3" ;;
-    esac
-  fi
-  if [[ -n "\$database_path" && -f "\$database_path" ]]; then
-    export KIROCC_DB_PATH="\$database_path"
-    return 0
-  fi
-
-  cat >&2 <<EOF
-claude-kiro: no usable Kiro credential source was found.
-Kiro CLI is only needed to create the login credential; traffic is sent by the
-kirocc gateway itself.
-
-Install/login Kiro CLI:
-  curl -fsSL https://cli.kiro.dev/install | bash
-  kiro-cli login
-  kiro-cli whoami
-
-Or export KIRO_API_KEY (and optionally KIRO_API_REGION) before launching.
-Managed default: KIRO_API_REGION=us-east-1 (eu-central-1 is also supported).
-Expected database: \${database_path:-<no default for this OS>}
-EOF
-  exit 78
-}
-
-gateway_is_healthy=false
-if curl -fsS --noproxy '*' --max-time 1 "\$gateway_url/health" >/dev/null 2>&1; then
-  gateway_is_healthy=true
-  if ! gateway_accepts_token; then
-    echo "claude-kiro: a gateway is already running at \$gateway_url but rejects the current KIROCC_API_KEY" >&2
-    echo "Use the matching local proxy key or choose an unused port, for example: KIROCC_PORT=3458 claude-kiro" >&2
-    exit 1
-  fi
-fi
-
-if [[ "\$gateway_is_healthy" != true ]]; then
-  prepare_local_kiro_credentials
-  "\$kirocc_bin" -port "\$gateway_port" >"\$log_file" 2>&1 &
-  started_pid=\$!
-  ready=false
-  for _attempt in {1..50}; do
-    if curl -fsS --noproxy '*' --max-time 1 "\$gateway_url/health" >/dev/null 2>&1; then
-      ready=true
-      break
-    fi
-    if ! kill -0 "\$started_pid" 2>/dev/null; then break; fi
-    sleep 0.1
-  done
-  if [[ "\$ready" != true ]]; then
-    echo "claude-kiro: gateway failed to start; log follows" >&2
-    tail -n 40 "\$log_file" >&2 2>/dev/null || true
-    exit 1
-  fi
-  if ! gateway_accepts_token; then
-    echo "claude-kiro: gateway started but rejected the configured local proxy key" >&2
-    exit 1
-  fi
-fi
-
-runtime_proxy_args=()
-if [[ "\${CLAUDE_KIRO_PRESERVE_PROXY:-0}" != 1 ]]; then
-  case "\$gateway_url" in
-    http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*|http://\[::1\]:*|https://\[::1\]:*)
-      # The gateway already inherited proxy variables for its Kiro requests.
-      # Remove them only from Claude Code so its loopback API calls cannot be
-      # sent through a proxy that does not honor NO_PROXY.
-      runtime_proxy_args=(
-        -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY
-        -u http_proxy -u https_proxy -u all_proxy
-      )
-      ;;
-  esac
-fi
-
-/usr/bin/env \
-  "\${runtime_proxy_args[@]}" \
-  -u ANTHROPIC_API_KEY \
-  -u CLAUDE_CODE_OAUTH_TOKEN \
-  -u CLAUDE_CODE_USE_BEDROCK \
-  -u CLAUDE_CODE_USE_VERTEX \
-  -u CLAUDE_CODE_USE_FOUNDRY \
-  CLAUDE_CONFIG_DIR="\$config_dir" \
-  ANTHROPIC_BASE_URL="\$gateway_url" \
-  ANTHROPIC_AUTH_TOKEN="\$proxy_token" \
-  "\$runtime_bin" "\$@"
-LAUNCHER
+Path(implementation).with_suffix(".json").write_text(json.dumps(configuration, indent=2) + "\n")
+Path(launcher).write_text("#!/usr/bin/env bash\nset -euo pipefail\nexec python3 " + shlex.quote(implementation) + ' "$@"\n')
+PYLAUNCHER
 chmod 0755 "$launcher_path"
+ln -sfn "claude-kiro" "$user_bin_dir/kiroclaude"
 printf '%s\n' "$runtime_kind" > "$install_root/install-mode"
 
 official_claude_sha256_after="$(node -e '
@@ -435,5 +347,5 @@ printf '  launcher: %s\n' "$launcher_path"
 printf '  gateway:  %s\n' "$install_root/bin/kirocc-native-websearch"
 printf '  runtime:  %s (%s)\n' "$runtime_bin" "$runtime_kind"
 printf '  config:    %s\n' "$state_root/claude-config"
-printf '  command:   claude-kiro\n\n'
+printf '  commands:  claude-kiro, kiroclaude (shared persistent gateway)\n\n'
 printf 'The official claude command was not modified by this installer.\n'

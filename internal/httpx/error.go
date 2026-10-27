@@ -11,6 +11,7 @@ const (
 	ErrTypeInvalidRequest = "invalid_request_error"
 	ErrTypeAPI            = "api_error"
 	ErrTypeAuthentication = "authentication_error"
+	ErrTypePermission     = "permission_error"
 	ErrTypeStream         = "stream_error"
 )
 

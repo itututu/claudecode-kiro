@@ -232,6 +232,14 @@ func TestConfig_Validate(t *testing.T) {
 		{"region host injection", Config{Host: "127.0.0.1", Port: 3456, KiroAPIRegion: "x.evil.example"}, true},
 		{"region path injection", Config{Host: "127.0.0.1", Port: 3456, KiroAPIRegion: "us-east-1/evil"}, true},
 		{"region too long", Config{Host: "127.0.0.1", Port: 3456, KiroAPIRegion: strings.Repeat("a", maxRegionLen+1)}, true},
+		// 0 means "no descriptor was inherited", which is how a direct,
+		// unmanaged start always looks. 1 and 2 are our own stdout/stderr:
+		// closing one after bind would silence the server's own logging.
+		{"no startup lock", Config{Host: "127.0.0.1", Port: 3456, StartupLockFD: 0}, false},
+		{"startup lock is stdout", Config{Host: "127.0.0.1", Port: 3456, StartupLockFD: 1}, true},
+		{"startup lock is stderr", Config{Host: "127.0.0.1", Port: 3456, StartupLockFD: 2}, true},
+		{"startup lock negative", Config{Host: "127.0.0.1", Port: 3456, StartupLockFD: -1}, true},
+		{"startup lock inherited", Config{Host: "127.0.0.1", Port: 3456, StartupLockFD: 3}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -240,5 +248,22 @@ func TestConfig_Validate(t *testing.T) {
 				t.Errorf("Validate() err = %v, wantErr = %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestStartupLockFDHasNoEnvCounterpart keeps the descriptor un-settable from
+// the environment. If an exported variable could set it, any process that can
+// influence the environment could make the gateway close a descriptor it never
+// inherited once the listener binds.
+func TestStartupLockFDHasNoEnvCounterpart(t *testing.T) {
+	for _, key := range []string{"KIROCC_STARTUP_LOCK_FD", "STARTUP_LOCK_FD", "KIROCC_STARTUP_LOCKFD"} {
+		t.Setenv(key, "7")
+	}
+	cfg := Config{Host: "127.0.0.1", Port: 3456}
+	if err := ApplyEnvOverrides(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StartupLockFD != 0 {
+		t.Errorf("StartupLockFD = %d after env overrides, want 0 (flag-only)", cfg.StartupLockFD)
 	}
 }

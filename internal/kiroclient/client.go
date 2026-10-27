@@ -11,6 +11,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"sort"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -66,8 +69,30 @@ type Response struct {
 	PromptTokens int // pre-counted from serialized payload via tiktoken
 }
 
-// TokenRefresher is called when a 403 is received to get a fresh token.
-type TokenRefresher func(ctx context.Context) (newToken string, err error)
+// RefreshedCredentials is the credential snapshot a refresh produces. The
+// bearer and the profile ARN are one unit: Kiro authorizes the pair, so a new
+// token sent alongside the profile ARN it replaced only earns a second 403. An
+// empty field means "unchanged".
+type RefreshedCredentials struct {
+	AccessToken string
+	ProfileARN  string
+}
+
+// resolve fills unset fields from the snapshot that was just rejected.
+func (r RefreshedCredentials) resolve(token, profileARN string) (string, string) {
+	if r.AccessToken != "" {
+		token = r.AccessToken
+	}
+	if r.ProfileARN != "" {
+		profileARN = r.ProfileARN
+	}
+	return token, profileARN
+}
+
+// TokenRefresher is called when OAuth authentication receives a 403 to get a
+// fresh credential snapshot. API-key authentication never invokes it because API
+// keys cannot be refreshed.
+type TokenRefresher func(ctx context.Context) (RefreshedCredentials, error)
 
 // ErrBodyReadIdle is returned when the Kiro response body has not produced
 // any data within the configured idle timeout. This guards against silent
@@ -203,6 +228,70 @@ func (c *HTTPClient) endpointURL(region string) string {
 	return fmt.Sprintf("https://runtime.%s.kiro.dev/", c.effectiveRegion(region))
 }
 
+// credentialRedactor removes known bearer credentials from upstream diagnostics,
+// including the escaped forms commonly used in JSON and URLs. Longest values
+// must be replaced first when the original and refreshed tokens overlap.
+func credentialRedactor(tokens []string) (*strings.Replacer, []string) {
+	var values []string
+	for _, token := range tokens {
+		if token == "" {
+			continue
+		}
+		values = append(values, token, url.QueryEscape(token), url.PathEscape(token))
+		if encoded, err := json.Marshal(token); err == nil {
+			values = append(values, string(encoded[1:len(encoded)-1]))
+		}
+	}
+	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
+	var pairs []string
+	for _, value := range values {
+		pairs = append(pairs, value, "[REDACTED]")
+	}
+	return strings.NewReplacer(pairs...), values
+}
+
+func redactCredentials(value string, tokens []string) string {
+	redactor, _ := credentialRedactor(tokens)
+	return redactor.Replace(value)
+}
+
+func safeResponseHeaders(header http.Header, tokens []string) http.Header {
+	result := header.Clone()
+	for name, values := range result {
+		for i, value := range values {
+			result[name][i] = redactCredentials(value, tokens)
+		}
+	}
+	return result
+}
+
+func readSafeErrorBody(body io.ReadCloser, tokens []string) string {
+	redactor, values := credentialRedactor(tokens)
+	value := readLimitedBody(body, upstreamBodyLimit+1)
+	partial := 0
+	if len(value) > upstreamBodyLimit {
+		value = value[:upstreamBodyLimit]
+		// A bounded read can split a reflected credential. Remove any matching
+		// suffix before redacting complete credentials, so no prefix leaks.
+		for _, credential := range values {
+			for n := min(len(credential)-1, len(value)); n > partial; n-- {
+				if strings.HasSuffix(value, credential[:n]) {
+					partial = n
+					break
+				}
+			}
+		}
+	}
+	value = redactor.Replace(value[:len(value)-partial])
+	if partial > 0 {
+		value += "[REDACTED]"
+	}
+	if len(value) > upstreamBodyLimit {
+		value = value[:upstreamBodyLimit]
+	}
+	return value
+}
+
 // GenerateAssistantResponse sends a request to the Kiro API with retry logic.
 func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string, payload *kiroproto.Payload, region string) (*Response, error) {
 	endpoint := c.endpointURL(region)
@@ -217,7 +306,16 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 		)
 	}
 
-	body, err := json.Marshal(payload)
+	// encode clones the payload so a refreshed profile ARN never mutates the
+	// caller's copy, which the retry layer above still holds.
+	encode := func(profileARN string) ([]byte, error) {
+		clone := *payload
+		clone.ProfileARN = profileARN
+		return json.Marshal(&clone)
+	}
+
+	currentProfileARN := payload.ProfileARN
+	body, err := encode(currentProfileARN)
 	if err != nil {
 		return nil, fmt.Errorf("marshal payload: %w", err)
 	}
@@ -233,6 +331,8 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 	}
 
 	currentToken := token
+	credentialTokens := []string{token}
+	authRetried := false
 	invocationID := uuid.New().String()
 	traceID, short := logging.TraceIDs(ctx)
 
@@ -278,6 +378,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 			c.recordError(ctx, err)
 			return nil, fmt.Errorf("do request: %w", err)
 		}
+		resp.Header = safeResponseHeaders(resp.Header, credentialTokens)
 
 		switch {
 		case resp.StatusCode == http.StatusOK:
@@ -295,7 +396,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 			// non-framed body and eventually errors with a confusing
 			// "reading prelude" message, masking the real upstream error.
 			if ct := resp.Header.Get("Content-Type"); !isEventStreamContentType(ct) {
-				errBody := readLimitedBody(resp.Body, upstreamBodyLimit)
+				errBody := readSafeErrorBody(resp.Body, credentialTokens)
 				exType := resolveAWSException(errBody, resp.Header)
 				// Retry transient AWS exceptions (throttling / internal / 5xx-equivalent)
 				// even though the HTTP status is 200.
@@ -328,25 +429,47 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 			}, nil
 
 		case resp.StatusCode == http.StatusForbidden:
-			_ = resp.Body.Close()
-			if attempt < maxAttempts-1 && c.tokenRefresher != nil {
-				newToken, err := c.tokenRefresher(ctx)
-				if err != nil {
+			errBody := readSafeErrorBody(resp.Body, credentialTokens)
+			// One auth retry at most, and only when the refresh actually hands
+			// back a different snapshot. A 403 answered with the same bearer and
+			// profile ARN is Kiro's authorization decision, not an expired
+			// token: resending it spends the remaining attempts on the same
+			// answer and delays the real error.
+			if !c.apiKeyAuth && !authRetried && attempt < maxAttempts-1 && c.tokenRefresher != nil {
+				authRetried = true
+				refreshed, refreshErr := c.tokenRefresher(ctx)
+				nextToken, nextProfileARN := refreshed.resolve(currentToken, currentProfileARN)
+				switch {
+				case refreshErr != nil:
 					slog.WarnContext(ctx, "kiro: token refresh failed",
-						"trace_id", short, "err", err)
-				} else {
-					currentToken = newToken
-					slog.InfoContext(ctx, "kiro: 403 received, token refreshed",
+						"trace_id", short, "err", redactCredentials(refreshErr.Error(), credentialTokens))
+				case nextToken == currentToken && nextProfileARN == currentProfileARN:
+					slog.InfoContext(ctx, "kiro: 403 received, credential snapshot unchanged",
+						"trace_id", short, "attempt", attempt+1, "max", maxAttempts)
+				default:
+					newBody, encodeErr := encode(nextProfileARN)
+					if encodeErr != nil {
+						return nil, fmt.Errorf("marshal payload: %w", encodeErr)
+					}
+					// Bearer and profile ARN advance together or not at all.
+					currentToken, currentProfileARN, body = nextToken, nextProfileARN, newBody
+					credentialTokens = append(credentialTokens, nextToken)
+					slog.InfoContext(ctx, "kiro: 403 received, credential snapshot refreshed",
 						"trace_id", short, "attempt", attempt+1, "max", maxAttempts)
 					continue
 				}
 			}
-			ue := &UpstreamError{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type")}
+			ue := &UpstreamError{
+				Status:      resp.StatusCode,
+				ContentType: resp.Header.Get("Content-Type"),
+				Exception:   resolveAWSException(errBody, resp.Header),
+				Body:        errBody,
+			}
 			c.recordError(ctx, ue)
 			return nil, ue
 
 		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-			errBody := readLimitedBody(resp.Body, upstreamBodyLimit)
+			errBody := readSafeErrorBody(resp.Body, credentialTokens)
 			if attempt < maxAttempts-1 {
 				delay := backoffDelay(attempt)
 				slog.WarnContext(ctx, "kiro: upstream error, retrying",
@@ -368,7 +491,7 @@ func (c *HTTPClient) GenerateAssistantResponse(ctx context.Context, token string
 			return nil, ue
 
 		default:
-			errBody := readLimitedBody(resp.Body, upstreamBodyLimit)
+			errBody := readSafeErrorBody(resp.Body, credentialTokens)
 			ue := &UpstreamError{
 				Status:      resp.StatusCode,
 				ContentType: resp.Header.Get("Content-Type"),

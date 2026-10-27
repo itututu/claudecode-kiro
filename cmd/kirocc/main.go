@@ -61,16 +61,14 @@ func run(ctx context.Context, args []string) error {
 		slog.Info("OpenTelemetry tracing enabled", "body_limit", cfg.OTelBodyLimit)
 	}
 
-	authMgr := auth.NewAuthManager(cfg.DBPath, auth.WithAPIKey(cfg.KiroAPIKey, cfg.KiroAPIRegion))
+	authMgr := auth.NewAuthManager(cfg.DBPath, auth.WithAPIKey(cfg.KiroAPIKey, cfg.ServingRegion()))
 	if authMgr.UsesAPIKey() {
 		// Say so up front: with a key there is no database read and no refresh,
 		// so the usual "credentials loaded" line never appears and its absence
 		// would otherwise look like a failure.
 		slog.Info("using Kiro API key", "auth_type", auth.AuthTypeAPIKey, "db_read", false)
 	}
-	if cfg.KiroAPIRegion != "" {
-		slog.Info("Kiro API region pinned", "region", cfg.KiroAPIRegion)
-	}
+	slog.Info("Kiro serving region", "region", cfg.ServingRegion(), "inference_host", cfg.InferenceHost())
 	kiroClient := buildKiroClient(authMgr, cfg)
 	srv := buildServer(authMgr, kiroClient, cfg)
 
@@ -78,10 +76,6 @@ func run(ctx context.Context, args []string) error {
 	go tokencount.Preload()
 
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	if cfg.APIKey == "" && !isLoopback(cfg.Host) {
-		slog.Warn("server is binding to a non-loopback address without an API key — all endpoints are unauthenticated",
-			"host", cfg.Host)
-	}
 	slog.Info("kirocc listening", "addr", "http://"+addr)
 	slog.Info("set ANTHROPIC_BASE_URL to use with Claude Code", "url", "http://"+addr)
 
@@ -97,11 +91,48 @@ func run(ctx context.Context, args []string) error {
 
 	done := awaitShutdown(httpSrv, otelShutdown, logCloser)
 
-	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	// Bind before releasing the launcher's startup lock, so the next launcher
+	// either waits on the lock or finds a port that is already accepting. There
+	// is no window where the lock is free but nothing is listening.
+	startupLock, err := inheritedStartupLock(cfg.StartupLockFD)
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", addr, err)
+	}
+	if startupLock != nil {
+		// Only our copy of the descriptor: the parent keeps its own and decides
+		// when the lock itself is released.
+		if err := startupLock.Close(); err != nil {
+			slog.Warn("closing inherited startup lock", "err", err)
+		}
+	}
+
+	if err := httpSrv.Serve(listener); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server: %w", err)
 	}
 	<-done
 	return nil
+}
+
+// inheritedStartupLock adopts the startup-lock descriptor the launcher passed
+// through, or returns nil when the gateway was started directly without one.
+// The descriptor is validated here rather than at close time so a bad number
+// fails before the port is taken.
+func inheritedStartupLock(fd int) (*os.File, error) {
+	if fd == 0 {
+		return nil, nil
+	}
+	f := os.NewFile(uintptr(fd), "startup-lock")
+	if f == nil {
+		return nil, fmt.Errorf("startup-lock-fd %d: not a valid descriptor", fd)
+	}
+	if _, err := f.Stat(); err != nil {
+		return nil, fmt.Errorf("startup-lock-fd %d: %w", fd, err)
+	}
+	return f, nil
 }
 
 func parseFlags(args []string) (config.Config, error) {
@@ -111,8 +142,9 @@ func parseFlags(args []string) (config.Config, error) {
 	fs.StringVar(&cfg.Host, "host", "127.0.0.1", "bind host")
 	fs.StringVar(&cfg.DBPath, "db", config.DefaultDBPath(), "kiro-cli SQLite DB path")
 	fs.StringVar(&cfg.APIKey, "api-key", "", "optional API key for authentication")
-	fs.StringVar(&cfg.KiroAPIKey, "kiro-api-key", "", "Kiro API key (ksk_...) to use instead of the kiro-cli database credential; also KIRO_API_KEY")
-	fs.StringVar(&cfg.KiroAPIRegion, "kiro-api-region", "", "region for Kiro API endpoints; overrides the credential region; also KIRO_API_REGION")
+	// The upstream Kiro key is deliberately env-only (KIRO_API_KEY): a flag
+	// would place the credential in argv, where any process can read it.
+	fs.StringVar(&cfg.KiroAPIRegion, "kiro-api-region", "", "Kiro serving region (us-east-1 or eu-central-1); also KIRO_API_REGION")
 	fs.BoolVar(&cfg.Debug, "debug", false, "enable debug logging with OTel JSON Lines output")
 	fs.BoolVar(&cfg.OTel, "otel", false, "enable OpenTelemetry tracing (OTLP HTTP exporter)")
 	fs.IntVar(&cfg.OTelBodyLimit, "otel-body-limit", config.DefaultOTelBodyLimit, "max bytes of request body to capture in OTel spans (0 = unlimited)")
@@ -123,32 +155,49 @@ func parseFlags(args []string) (config.Config, error) {
 	fs.IntVar(&cfg.LogFile.MaxAge, "log-max-age", logging.DefaultLogMaxAge, "max days to retain old log files")
 	fs.BoolVar(&cfg.LogFile.Compress, "log-compress", false, "compress rotated log files with gzip")
 	fs.BoolVar(&cfg.LogFile.Console, "log-console", false, "also write logs to console when -log-file is set")
+	// Non-secret: a descriptor number, not a credential. Flag-only so an
+	// exported value can never make us trust a descriptor we did not inherit.
+	fs.IntVar(&cfg.StartupLockFD, "startup-lock-fd", 0, "inherited startup-lock descriptor to close once the listener is bound (0 = none)")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
 	}
+	// Record which flags the caller actually passed so ApplyEnvOverrides can
+	// leave them alone. Without this, an exported default silently wins over
+	// an explicit argument.
+	fs.Visit(func(f *flag.Flag) { cfg.MarkExplicit(f.Name) })
 	return cfg, nil
 }
 
 func buildKiroClient(authMgr *auth.AuthManager, cfg config.Config) kiroclient.Client {
 	clientOpts := []kiroclient.HTTPClientOption{
 		kiroclient.WithTokenCounter(tokencount.CountBytes),
-		kiroclient.WithTokenRefresher(func(ctx context.Context) (string, error) {
+	}
+	if authMgr.UsesAPIKey() {
+		// API keys are static credentials; rereading one cannot repair a 403.
+		clientOpts = append(clientOpts, kiroclient.WithAPIKeyAuth())
+	} else {
+		clientOpts = append(clientOpts, kiroclient.WithTokenRefresher(func(ctx context.Context) (kiroclient.RefreshedCredentials, error) {
 			// Invalidate cache so GetToken re-reads from DB and refreshes
-			// instead of returning the same rejected token.
+			// instead of returning the same rejected token. The profile ARN
+			// travels with the token: a refresh can move both, and the retry is
+			// only valid if the request carries the pair that was issued
+			// together.
 			authMgr.InvalidateCache()
 			creds, err := authMgr.GetToken(ctx)
 			if err != nil {
-				return "", err
+				return kiroclient.RefreshedCredentials{}, err
 			}
-			return creds.AccessToken, nil
-		}),
+			return kiroclient.RefreshedCredentials{
+				AccessToken: creds.AccessToken,
+				ProfileARN:  creds.ProfileARN,
+			}, nil
+		}))
 	}
-	if authMgr.UsesAPIKey() {
-		clientOpts = append(clientOpts, kiroclient.WithAPIKeyAuth())
-	}
-	if cfg.KiroAPIRegion != "" {
-		clientOpts = append(clientOpts, kiroclient.WithRegion(cfg.KiroAPIRegion))
-	}
+	// Always pin the serving region. Validate has already confirmed it is one
+	// Kiro actually serves, so deriving endpoints from it beats inheriting a
+	// credential's sign-in region, which is often somewhere Kiro has no
+	// inference endpoint at all.
+	clientOpts = append(clientOpts, kiroclient.WithRegion(cfg.ServingRegion()))
 	if cfg.OTel {
 		clientOpts = append(clientOpts, kiroclient.WithOTel(cfg.OTelBodyLimit))
 	}
@@ -156,7 +205,10 @@ func buildKiroClient(authMgr *auth.AuthManager, cfg config.Config) kiroclient.Cl
 }
 
 func buildServer(authMgr *auth.AuthManager, client kiroclient.Client, cfg config.Config) *server.Server {
-	opts := []server.ServerOption{server.WithKeepAliveInterval(cfg.KeepAliveInterval)}
+	opts := []server.ServerOption{
+		server.WithKeepAliveInterval(cfg.KeepAliveInterval),
+		server.WithUpstreamIdentity(authMgr.AuthType(), cfg.ServingRegion(), cfg.InferenceHost()),
+	}
 	if cfg.OTel {
 		opts = append(opts, server.WithOTel(cfg.OTelBodyLimit))
 	}
@@ -164,10 +216,6 @@ func buildServer(authMgr *auth.AuthManager, client kiroclient.Client, cfg config
 		opts = append(opts, server.WithCapture(true))
 	}
 	return server.New(authMgr, cfg.APIKey, client, opts...)
-}
-
-func isLoopback(host string) bool {
-	return host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
 
 // awaitShutdown registers a SIGINT/SIGTERM handler that gracefully stops the

@@ -15,8 +15,22 @@ const (
 	errTypeInvalidRequest = httpx.ErrTypeInvalidRequest
 	errTypeAPI            = httpx.ErrTypeAPI
 	ErrTypeAuthentication = httpx.ErrTypeAuthentication
+	errTypePermission     = httpx.ErrTypePermission
 	errTypeStreamError    = httpx.ErrTypeStream
 )
+
+// classifyUpstreamHTTPError maps a transport-level upstream failure onto the
+// response Claude Code expects. A 403 is an authorization decision by Kiro, not
+// a gateway fault: collapsing it into api_error/502 hides the only actionable
+// cause (entitlement or credential) behind a generic "bad gateway". Everything
+// else keeps the caller's own 502 wording.
+func classifyUpstreamHTTPError(err error, fallbackMessage string) streamFinalError {
+	var upstreamErr *kiroclient.UpstreamError
+	if errors.As(err, &upstreamErr) && upstreamErr.Status == http.StatusForbidden {
+		return newStreamFinalError(http.StatusForbidden, errTypePermission, "upstream authorization rejected")
+	}
+	return newStreamFinalError(http.StatusBadGateway, errTypeAPI, fallbackMessage)
+}
 
 // retryableInvalidStateReasons are invalidStateEvent reasons that can be resolved
 // by clearing the conversation ID and retrying.

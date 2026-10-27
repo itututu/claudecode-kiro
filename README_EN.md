@@ -12,7 +12,7 @@ optional ClawGod patches and Kiro-native WebSearch support added to the excellen
 
 This downstream project keeps the official `claude` command untouched. It
 installs an explicit `claude-kiro` launcher, its own configuration directory,
-and a patched gateway on port `3457`. The default mode uses the official Claude
+and a patched gateway (macOS/Linux port `3456`; Windows port `3457`). The default mode uses the official Claude
 Code runtime; ClawGod is installed only when explicitly selected.
 
 > This project is not affiliated with Anthropic, Amazon, Kiro, d-kuro, or
@@ -171,7 +171,7 @@ isolation, credential hygiene, and verification rules.
 - Go 1.26.1+ and Node.js 18+
 - one usable Kiro upstream credential: a Kiro CLI login database, or a Kiro API key and region
 - an official Claude Code installation (used locally; never copied into this repository)
-- macOS/Linux: curl
+- macOS/Linux: curl and Python 3
 - optional ClawGod mode only: Bun 1.3.14+, ripgrep, and either `shasum` or `sha256sum`
 - the per-user `.local/bin` directory on `PATH` (the Windows installer adds it)
 
@@ -286,12 +286,14 @@ are:
 | Optional ClawGod files | `~/.local/share/clawgod-kirocc/clawgod/` | `%LOCALAPPDATA%\ClawGodKiroCC\clawgod-kirocc\clawgod\` |
 | Isolated state | `~/.clawgod-kirocc/` | `%USERPROFILE%\.clawgod-kirocc\` |
 | Isolated Claude config | `~/.clawgod-kirocc/claude-config/` | `%USERPROFILE%\.clawgod-kirocc\claude-config\` |
-| Gateway logs | `${TMPDIR:-/tmp}/clawgod-kirocc-gateway-*` | `%TEMP%\clawgod-kirocc-gateway-*` |
+| Gateway logs | `~/.clawgod-kirocc/gateway/gateway-*.log` | `%TEMP%\clawgod-kirocc-gateway-*` |
 
-The default launcher port is `3457`; standalone `kirocc` defaults to `3456`.
-If a healthy gateway already answers at `KIROCC_URL`, the launcher reuses it.
-Otherwise it starts one for the lifetime of the `claude-kiro` process and stops
-that child gateway on exit.
+On macOS/Linux, `claude-kiro` and its `kiroclaude` alias share one persistent,
+authenticated gateway at `http://127.0.0.1:3456`. The launcher waits for readiness,
+checks that missing/wrong local credentials are rejected, and keeps the gateway
+running after Claude exits. See [shared gateway operation](docs/shared-gateway.md).
+The Windows launcher still defaults to `3457` and manages its child gateway for
+the lifetime of the Claude process. Standalone `kirocc` defaults to `3456`.
 
 ### Verify the installation
 
@@ -301,6 +303,7 @@ macOS/Linux:
 ./scripts/doctor.sh
 command -v claude
 command -v claude-kiro
+command -v kiroclaude
 claude --version
 claude-kiro --version
 ```
@@ -317,15 +320,15 @@ claude-kiro --version
 
 The doctor is read-only: it does not print credentials, modify configuration,
 start Claude Code, or start/stop the gateway. A gateway-health warning is
-normal while `claude-kiro` is closed. Use `./scripts/doctor.sh --strict` in
+normal before the first gateway launch. Use `./scripts/doctor.sh --strict` in
 automation when warnings should also produce a non-zero exit status.
 
 The two command paths must be different. In the default mode both commands use
 the official runtime, but only `claude-kiro` uses the isolated Kiro-backed
 profile. Green ClawGod branding appears only after selecting ClawGod. A version
-command can exit before there is time to inspect
-the managed health endpoint, so check `http://127.0.0.1:3457/health` only while
-an interactive `claude-kiro` session is open.
+command also starts or reuses the shared gateway on macOS/Linux. Run
+`kiroclaude --gateway-status` to verify local readiness and authentication;
+this check does not establish that upstream inference works.
 
 ### Installer options and overrides
 
@@ -346,7 +349,7 @@ an interactive `claude-kiro` session is open.
 | `CLAWGOD_KIROCC_INSTALL_ROOT` | Runtime root; defaults to the OS-specific path above |
 | `CLAWGOD_KIROCC_STATE_ROOT` | State root; defaults to `~/.clawgod-kirocc` |
 | `CLAWGOD_KIROCC_BIN_DIR` | Launcher directory; defaults to `~/.local/bin` |
-| `KIROCC_PORT` | Managed gateway port; defaults to `3457` |
+| `KIROCC_PORT` | Managed gateway port; defaults to `3456` on macOS/Linux, `3457` on Windows |
 
 Example using an existing isolated ClawGod executable:
 
@@ -809,11 +812,11 @@ Note: `[1m]` has different meanings on request vs. response. On the **request** 
 | Symptom | Check or fix |
 | --- | --- |
 | `claude-kiro: command not found` | Add the per-user `.local/bin` directory to `PATH`; on Windows open a new terminal after installation |
-| Installer reports a missing prerequisite | Default mode needs Go/Node (plus curl on macOS/Linux); Bun, ripgrep, and SHA-256 tooling are required only with ClawGod |
+| Installer reports a missing prerequisite | Default mode needs Go/Node (plus curl and Python 3 on macOS/Linux); Bun, ripgrep, and SHA-256 tooling are required only with ClawGod |
 | `go.exe: unknown GOEXPERIMENT jsonv2` | The active `go.exe` is older than this project requires. Run `winget upgrade --id GoLang.Go -e`, open a new PowerShell window, then use `where.exe go` and `go version` to confirm Go 1.26.1+ is active |
 | `No usable Kiro credential source found` | Run the displayed Kiro CLI install command, then `kiro-cli login` and `kiro-cli whoami`; or set `KIRO_API_KEY`/`KIRO_API_REGION` for installation and launch |
 | `official Claude Code command not found` | Install official Claude Code and confirm `command -v claude` before rerunning the installer |
-| Gateway fails to start | Read `${TMPDIR:-/tmp}/clawgod-kirocc-gateway-$UID-${KIROCC_PORT:-3457}.log`; choose another port with `KIROCC_PORT=3458` if needed |
+| Gateway fails to start | On macOS/Linux inspect `~/.clawgod-kirocc/gateway/gateway-${KIROCC_PORT:-3456}.log`; incompatible listeners are preserved for deliberate inspection |
 | `authentication failed` or Kiro returns 401/403 | This is an upstream Kiro credential problem: run `kiro-cli login`/`kiro-cli whoami` again, or verify `KIRO_API_KEY` and `KIRO_API_REGION` |
 | `/model` returns a bodyless 502 | Pull the latest source and rerun the installer; the launcher now defaults to `us-east-1`. If it persists, confirm `kiro-cli chat --list-models` includes the model, then try `$env:KIRO_API_REGION='eu-central-1'; claude-kiro` in PowerShell |
 | A manual local-gateway request works, but Claude Code hangs/returns 502 and the gateway logs no POST | `HTTP_PROXY`/`HTTPS_PROXY` may be intercepting loopback traffic. The current launcher preserves proxy variables for the gateway's Kiro connection but removes them only from the Claude Code child; pull and rerun the installer |

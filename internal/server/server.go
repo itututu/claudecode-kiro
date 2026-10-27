@@ -31,6 +31,17 @@ func WithKeepAliveInterval(interval time.Duration) ServerOption {
 	return func(s *Server) { s.keepAliveInterval = interval }
 }
 
+// WithUpstreamIdentity supplies the non-secret upstream configuration identity
+// reported by GET /v1/kirocc/status. These are derived values (auth mode,
+// validated serving region, endpoint host), never credentials.
+func WithUpstreamIdentity(authType, region, inferenceHost string) ServerOption {
+	return func(s *Server) {
+		s.authType = authType
+		s.region = region
+		s.inferenceHost = inferenceHost
+	}
+}
+
 // Server is the HTTP server for the kirocc proxy.
 type Server struct {
 	apiKey            string
@@ -38,6 +49,10 @@ type Server struct {
 	otelBodyLimit     int
 	captureEnabled    bool
 	keepAliveInterval time.Duration
+	authType          string
+	region            string
+	inferenceHost     string
+	readiness         *readinessTracker
 	mux               *http.ServeMux
 	messages          *messagesapp.Service
 }
@@ -45,8 +60,9 @@ type Server struct {
 // New creates a new Server.
 func New(authMgr messagesapp.TokenGetter, apiKey string, client kiroclient.Client, opts ...ServerOption) *Server {
 	s := &Server{
-		apiKey: apiKey,
-		mux:    http.NewServeMux(),
+		apiKey:    apiKey,
+		readiness: newReadinessTracker(),
+		mux:       http.NewServeMux(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -69,8 +85,11 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) registerRoutes() {
+	// /health and /v1/models are deliberately not wrapped: a static listing or
+	// a liveness check must never be able to establish upstream readiness.
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
+	s.mux.HandleFunc("GET /v1/kirocc/status", s.handleStatus)
 	s.mux.HandleFunc("POST /v1/messages/count_tokens", s.messages.HandleCountTokens)
-	s.mux.HandleFunc("POST /v1/messages", s.messages.HandleMessages)
+	s.mux.HandleFunc("POST /v1/messages", s.readinessProbeMiddleware(s.messages.HandleMessages))
 }

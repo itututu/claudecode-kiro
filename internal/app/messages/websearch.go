@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/d-kuro/kirocc/internal/anthropic"
 	"github.com/d-kuro/kirocc/internal/auth"
 	"github.com/d-kuro/kirocc/internal/httpx"
 	"github.com/d-kuro/kirocc/internal/kiroclient"
 	"github.com/d-kuro/kirocc/internal/respconv"
 	"github.com/d-kuro/kirocc/internal/tokencount"
+	"github.com/google/uuid"
 )
 
 const webSearchQueryPrefix = "Perform a web search for the query:"
@@ -85,7 +85,8 @@ func (s *Service) runWebSearch(ctx context.Context, w http.ResponseWriter, req *
 	result, err := s.webSearchClient.SearchWeb(ctx, creds.AccessToken, creds.ProfileARN, creds.Region, query)
 	if err != nil {
 		logUpstreamError(ctx, short, err, "operation", "web_search")
-		httpx.WriteError(w, http.StatusBadGateway, errTypeAPI, "Kiro web search failed")
+		final := classifyUpstreamHTTPError(err, "Kiro web search failed")
+		httpx.WriteError(w, final.status, final.jsonType, final.jsonMessage)
 		return
 	}
 
@@ -99,16 +100,19 @@ func (s *Service) runWebSearch(ctx context.Context, w http.ResponseWriter, req *
 
 func (s *Service) runStreamingWebSearch(ctx context.Context, w http.ResponseWriter, req *anthropic.Request, creds *auth.Credentials, responseModel string, contextWindowSize int, query string, inputTokens int, short string) {
 	session := newStreamSession(ctx, w, s.keepAliveInterval)
-	session.SetSSEHeaders()
-	session.Start()
 	defer session.Stop()
 
+	// Headers and keep-alives stay unsent until the first upstream call
+	// succeeds. Writing a 200 with SSE headers first would commit the response,
+	// leaving an upstream rejection no way to be reported as its real status.
 	result, err := s.webSearchClient.SearchWeb(session.Context(), creds.AccessToken, creds.ProfileARN, creds.Region, query)
 	if err != nil {
 		logUpstreamError(ctx, short, err, "operation", "web_search")
-		_ = session.WriteFinalError(newStreamFinalError(http.StatusBadGateway, errTypeAPI, "Kiro web search failed"), nil)
+		_ = session.WriteFinalError(classifyUpstreamHTTPError(err, "Kiro web search failed"), nil)
 		return
 	}
+	session.SetSSEHeaders()
+	session.Start()
 
 	toolUseID := "srvtoolu_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	content := buildWebSearchResultContent(result.Results)
